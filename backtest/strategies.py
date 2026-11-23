@@ -207,8 +207,13 @@ STRATEGIES = {
 
 
 # ---------------------------------------------------------------- engine
+MAX_TRADES_PER_DAY = 4  # new entries allowed per UTC day; extra setups are skipped
+
+
 def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
     o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    day = df["time"].to_numpy() // 86400
+    cur_day, entries_today = -1, 0
     le, se, lx, sx, stop_l, stop_s, rr = (s[k] for k in ("le", "se", "lx", "sx", "stop_l", "stop_s", "rr"))
     n = len(c)
     pos, entry, stop, tp = 0, 0.0, np.nan, np.nan
@@ -227,7 +232,10 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
     for t in range(start, n):
         if want_exit and pos:
             close_at(o[t], t)
-        if want_entry and not pos:
+        if day[t] != cur_day:
+            cur_day, entries_today = day[t], 0
+        if want_entry and not pos and entries_today < MAX_TRADES_PER_DAY:
+            entries_today += 1
             pos, entry = want_entry, o[t]
             stop = entry - pos * want_stop if want_stop == want_stop else np.nan
             tp = entry + pos * rr * want_stop if (rr and want_stop == want_stop) else np.nan
