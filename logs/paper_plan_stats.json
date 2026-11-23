@@ -1,0 +1,80 @@
+{
+ "period": "2020-02-11 -> 2026-11-21",
+ "capital": 2500,
+ "combined": {
+  "total_return_pct": 22.93563379885697,
+  "cagr_pct": 3.0942080946180894,
+  "max_dd_pct": 2.4160168650522396,
+  "cagr_over_maxdd": 1.2807063308935909,
+  "sharpe": 1.2793411839435156,
+  "sortino": 2.0393917985036722,
+  "trades": 673,
+  "trades_per_year": 99.31848484848486
+ },
+ "per_coin": [
+  {
+   "coin": "BTCUSD",
+   "capital": 1400,
+   "trades": 160,
+   "skipped_below_1_contract": 117,
+   "net_usd": 387.2957834469503,
+   "max_dd_pct": 2.9194238729906896,
+   "cagr_pct": 3.668019672361411
+  },
+  {
+   "coin": "ETHUSD",
+   "capital": 600,
+   "trades": 122,
+   "skipped_below_1_contract": 3579,
+   "net_usd": 147.4506255243857,
+   "max_dd_pct": 2.9819970135859686,
+   "cagr_pct": 3.2981351867156006
+  },
+  {
+   "coin": "XRPUSD",
+   "capital": 167,
+   "trades": 169,
+   "skipped_below_1_contract": 0,
+   "net_usd": 33.975242909598165,
+   "max_dd_pct": 6.1941082947627795,
+   "cagr_pct": 2.780054811140076
+  },
+  {
+   "coin": "BCHUSD",
+   "capital": 167,
+   "trades": 153,
+   "skipped_below_1_contract": 1498,
+   "net_usd": 10.782207746046026,
+   "max_dd_pct": 4.753333938818949,
+   "cagr_pct": 0.9328146314748986
+  },
+  {
+   "coin": "LTCUSD",
+   "capital": 166,
+   "trades": 73,
+   "skipped_below_1_contract": 8038,
+   "net_usd": 6.034515049877017,
+   "max_dd_pct": 3.1177821089237168,
+   "cagr_pct": 0.5204494168353335
+  }
+ ],
+ "bootstrap": {
+  "6m": {
+   "return_pct_p5": -0.8569669821084663,
+   "return_pct_p50": 1.6155692109985558,
+   "return_pct_p95": 4.685884082353026,
+   "prob_loss_pct": 15.6,
+   "max_dd_pct_p50": 1.166425285212519,
+   "max_dd_pct_p95": 2.0809647807078697
+  },
+  "12m": {
+   "return_pct_p5": -0.3256142760035144,
+   "return_pct_p50": 3.2648648500744457,
+   "return_pct_p95": 7.373935297373065,
+   "prob_loss_pct": 7.08,
+   "max_dd_pct_p50": 1.462562647918142,
+   "max_dd_pct_p95": 2.597806251961105
+  }
+ },
+ "months_to_100_trades": 12.0823429981907
+}

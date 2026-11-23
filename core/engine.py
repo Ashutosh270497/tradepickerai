@@ -160,6 +160,18 @@ def path_exit(m: Market, fill: int, d: int, etype: int, stop: float, tgt: float,
     return float(m.n), m.c[-1], "end", False
 
 
+def funding_events(m: Market, entry_pos: float, exit_pos: float, d: int, qty: float):
+    """Funding settlements strictly inside (entry_pos, exit_pos): arrays (bar_index, rate, pnl).
+    pnl = -direction * rate * qty * price at the settlement bar's open (negative = paid)."""
+    lo = np.searchsorted(m.settle_idx, entry_pos, side="right")
+    hi = np.searchsorted(m.settle_idx, exit_pos, side="left")
+    if hi <= lo:
+        return np.zeros(0, np.int64), np.zeros(0), np.zeros(0)
+    ks = m.settle_idx[lo:hi]
+    rates = m.settle_rate[lo:hi]
+    return ks, rates, -d * rates * m.o[ks] * qty
+
+
 def funding_paid(m: Market, entry_pos: float, exit_pos: float, d: int, qty: float) -> float:
     """Funding P&L (negative = paid) for settlements strictly inside (entry_pos, exit_pos)."""
     lo = np.searchsorted(m.settle_idx, entry_pos, side="right")
@@ -168,6 +180,24 @@ def funding_paid(m: Market, entry_pos: float, exit_pos: float, d: int, qty: floa
         return 0.0
     ks = m.settle_idx[lo:hi]
     return float(-d * np.sum(m.settle_rate[lo:hi] * m.o[ks]) * qty)
+
+
+def position_size(equity: float, entry: float, dist: float, lot: float, risk: float,
+                  max_lev: float) -> tuple[float, bool]:
+    """Quantity risking `risk` x equity at the stop, capped at `max_lev` x equity notional,
+    rounded down to whole contracts. Returns (qty, capped); qty 0 means 'skip'."""
+    qty = risk * equity / dist
+    capped = qty * entry > max_lev * equity
+    if capped:
+        qty = max_lev * equity / entry
+    return float(np.floor(qty / lot + 1e-9) * lot), bool(capped)
+
+
+def entry_fill(m: Market, f: int, d: int, etype: int, px: float, sc: "Scenario") -> tuple[float, float]:
+    """Entry price and position (bar units) for a candidate filling at bar f."""
+    if etype == LIMIT:
+        return float(px), f + 0.5
+    return (m.o[f] if sc.maker_fills else m.o[f] * (1 + d * sc.slip)), float(f)
 
 
 def trade_costs(entry: float, exit_: float, qty: float, etype: int, maker_exit: bool,
@@ -204,10 +234,7 @@ def run(m: Market, cand: dict, start: int, end: int, sc: Scenario, dyn_long=None
             i += 1
             continue
         f, d, et = int(fill[i]), int(dirs[i]), int(cand["etype"][i])
-        if et == LIMIT:
-            entry, entry_pos = float(cand["px"][i]), f + 0.5
-        else:
-            entry, entry_pos = (m.o[f] if sc.maker_fills else m.o[f] * (1 + d * sc.slip)), float(f)
+        entry, entry_pos = entry_fill(m, f, d, et, cand["px"][i], sc)
         stop = cand["stop"][i] if not np.isnan(cand["stop"][i]) else entry - d * cand["sdist"][i]
         dist = (entry - stop) * d
         if not dist > 0:
@@ -237,11 +264,7 @@ def run(m: Market, cand: dict, start: int, end: int, sc: Scenario, dyn_long=None
             i += 1
             continue
         # sizing
-        qty = risk * equity / dist
-        capped = qty * entry > max_lev * equity
-        if capped:
-            qty = max_lev * equity / entry
-        qty = np.floor(qty / m.lot + 1e-9) * m.lot
+        qty, capped = position_size(equity, entry, dist, m.lot, risk, max_lev)
         if qty <= 0:
             skipped_small += 1
             i += 1
