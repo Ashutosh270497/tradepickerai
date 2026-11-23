@@ -1,0 +1,6 @@
+pandas>=3.0
+numpy>=2.5
+pyarrow>=26.0
+matplotlib>=3.11
+pytest>=8.0
+tabulate>=0.9

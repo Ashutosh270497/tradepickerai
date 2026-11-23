@@ -1,4 +1,7 @@
-data/
+# earlier exploratory CSV caches and results (regenerable); Phase 2 parquet data is committed
+data/*.csv
 results/
+logs/download_*.log
 __pycache__/
 *.pyc
+.pytest_cache/
