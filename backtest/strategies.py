@@ -44,6 +44,17 @@ def rsi(s: pd.Series, n: int = 14) -> pd.Series:
     return 100 - 100 / (1 + up / dn)
 
 
+def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    up, dn = df["high"].diff(), -df["low"].diff()
+    plus = pd.Series(np.where((up > dn) & (up > 0), up, 0.0), index=df.index)
+    minus = pd.Series(np.where((dn > up) & (dn > 0), dn, 0.0), index=df.index)
+    a = atr(df, n)
+    pdi = 100 * plus.ewm(alpha=1 / n, adjust=False).mean() / a
+    mdi = 100 * minus.ewm(alpha=1 / n, adjust=False).mean() / a
+    dx = 100 * (pdi - mdi).abs() / (pdi + mdi)
+    return dx.ewm(alpha=1 / n, adjust=False).mean()
+
+
 def supertrend_dir(df: pd.DataFrame, n: int = 10, mult: float = 3.0) -> np.ndarray:
     a = atr(df, n).to_numpy()
     hl2 = ((df["high"] + df["low"]) / 2).to_numpy()
@@ -207,12 +218,23 @@ STRATEGIES = {
 
 
 # ---------------------------------------------------------------- engine
-MAX_TRADES_PER_DAY = 4  # new entries allowed per UTC day; extra setups are skipped
+MAX_TRADES_PER_DAY = 4  # new entries allowed per day (India time); extra setups are skipped
+IST_OFFSET = 19800
 
 
-def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
+def load_funding(symbol: str, df: pd.DataFrame, step: int) -> np.ndarray:
+    """Per-candle funding as a fraction of notional (positive = longs pay shorts).
+
+    Delta publishes the funding rate as % per 8 hours; it is charged here pro-rata per candle."""
+    f = pd.read_csv(csv_path(f"FUNDING:{symbol}", "1h")).sort_values("time")
+    merged = pd.merge_asof(df[["time"]], f[["time", "close"]], on="time")
+    return (merged["close"].fillna(0.01).to_numpy() / 100) * step / 28800
+
+
+def simulate(df: pd.DataFrame, s: dict, start: int, cost: float, funding: np.ndarray | None = None):
     o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
-    day = df["time"].to_numpy() // 86400
+    day = (df["time"].to_numpy() + IST_OFFSET) // 86400
+    fund_paid = 0.0
     cur_day, entries_today = -1, 0
     le, se, lx, sx, stop_l, stop_s, rr = (s[k] for k in ("le", "se", "lx", "sx", "stop_l", "stop_s", "rr"))
     n = len(c)
@@ -223,8 +245,9 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
     want_exit, want_entry, want_stop = False, 0, np.nan
 
     def close_at(price, t):
-        nonlocal pos, realised
-        gross = pos * (price / entry - 1)
+        nonlocal pos, realised, fund_paid
+        gross = pos * (price / entry - 1) - fund_paid
+        fund_paid = 0.0
         realised += gross - 2 * cost
         trades.append((t, pos, gross))
         pos = 0
@@ -239,6 +262,8 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
             pos, entry = want_entry, o[t]
             stop = entry - pos * want_stop if want_stop == want_stop else np.nan
             tp = entry + pos * rr * want_stop if (rr and want_stop == want_stop) else np.nan
+        if pos and funding is not None:
+            fund_paid += pos * funding[t]
         if pos > 0:
             if l[t] <= stop:
                 close_at(min(o[t], stop), t)
@@ -257,15 +282,15 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float):
                 want_entry, want_stop = 1, (stop_l[t] if stop_l is not None else np.nan)
             elif se[t] and not le[t]:
                 want_entry, want_stop = -1, (stop_s[t] if stop_s is not None else np.nan)
-        eq[t] = realised + (pos * (c[t] / entry - 1) - cost if pos else 0.0)
+        eq[t] = realised + (pos * (c[t] / entry - 1) - cost - fund_paid if pos else 0.0)
     if pos:
         close_at(c[-1], n - 1)
         eq[-1] = realised
     return trades, eq[start:]
 
 
-def evaluate(df: pd.DataFrame, s: dict, start: int) -> dict:
-    trades, eq = simulate(df, s, start, TAKER)
+def evaluate(df: pd.DataFrame, s: dict, start: int, funding: np.ndarray | None = None) -> dict:
+    trades, eq = simulate(df, s, start, TAKER, funding)
     if not trades:
         return {"trades": 0}
     idx, side, gross = (np.array(x) for x in zip(*trades))
