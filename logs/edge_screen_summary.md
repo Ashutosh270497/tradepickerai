@@ -1,0 +1,6 @@
+- configs: 242; rows (config x asset/pooled x IS/OOS): 1452
+- individual asset-level tests: 968
+- pooled OOS raw p<0.05: 23 (expected by chance 12.1)
+- pooled IS raw p<0.05: 29 (expected by chance 12.1)
+- pooled OOS BH q<=0.05: 2; pooled IS BH q<=0.05: 2
+- edge_ok: 45  same_sign_ok: 105  bh_ok: 2  SURVIVORS: 1

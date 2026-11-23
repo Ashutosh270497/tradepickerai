@@ -1,0 +1,7 @@
+# market data is rebuilt by the download scripts (python3 -m core.data download, python3 -m core.binance_data)
+data/
+results/
+logs/download_*.log
+__pycache__/
+*.pyc
+.pytest_cache/
