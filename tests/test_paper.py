@@ -263,3 +263,119 @@ def test_container_state_roundtrip_and_conditional_write(tmp_path, monkeypatch):
     fake.put_object(Bucket="bucket", Key="paper.db", Body=fake.obj, IfMatch=fake.etag)   # someone else wrote v3
     with pytest.raises(RuntimeError, match="stale ETag"):
         run_task.upload(etag)
+
+
+# ---------------------------------------------------------------- plan v2: execution cost, staleness, executable track
+def test_book_metrics_exec_cost_vs_mid_and_signed_staleness():
+    from paper.logic import book_metrics
+    q = {"best_bid": 99.9, "best_ask": 100.1, "ltp": 100.3}
+    b = book_metrics(q, "buy")
+    assert b["mid"] == pytest.approx(100.0) and b["exec_price"] == 100.1
+    assert b["exec_cost"] == pytest.approx(0.001) and b["staleness"] == pytest.approx(0.003)
+    s = book_metrics(q, "sell")
+    assert s["exec_price"] == 99.9 and s["exec_cost"] == pytest.approx(0.001)
+    assert book_metrics({**q, "ltp": 99.8}, "sell")["staleness"] == pytest.approx(-0.002)   # signed
+    assert book_metrics({"ltp": 100.0}, "buy")["exec_cost"] is None                         # no book -> no metric
+    assert book_metrics({"best_bid": 101, "best_ask": 100, "ltp": 100}, "buy")["exec_cost"] is None   # crossed book rejected
+
+
+def quoted(o, half=0.0003, stale=0.0007):
+    """Synthetic live-like snapshot around a bar open: spread 2*half, last price `stale` above mid."""
+    return {"ref": o, "best_bid": o * (1 - half), "best_ask": o * (1 + half), "ltp": o * (1 + stale),
+            "bid_size": 1e6, "ask_size": 1e6, "mark": o}
+
+
+def replay_quoted(st, bars, start, end, **kw):
+    opens = dict(zip(bars["time"], bars["o"]))
+    with st.tx() as db:
+        st.set_meta("start_time", start, db)
+    for T in range(start, end, FOUR_H):
+        process_coin(st, cfg(st), T, quoted(opens[T], **kw), live=False, paused=False, now=T)
+
+
+def test_fill_rows_record_exec_cost_and_staleness(tmp_path):
+    bars = synthetic()
+    st = make_store(tmp_path, bars)
+    replay_quoted(st, bars, T0 + 60 * 86400, T0 + 120 * 86400)
+    f = pd.DataFrame([dict(r) for r in st.db.execute("SELECT * FROM fills WHERE exec_cost IS NOT NULL")])
+    assert len(f) > 3
+    np.testing.assert_allclose(f["exec_cost"], 0.0003, rtol=1e-9)                      # (ask-mid)/mid = half-spread
+    np.testing.assert_allclose(f["staleness"], 0.0007, rtol=1e-9)                      # (ltp-mid)/mid, signed
+    buy = f["side"].eq("buy")
+    np.testing.assert_allclose(f.loc[buy, "exec_price"], f.loc[buy, "best_ask"])
+    np.testing.assert_allclose(f.loc[~buy, "exec_price"], f.loc[~buy, "best_bid"])
+
+
+def test_executable_track_same_trades_book_fills_and_model_parity_intact(tmp_path):
+    bars = synthetic()
+    st = make_store(tmp_path, bars, funding_pct=0.01 + 0.02 * np.sin(np.arange(len(bars)) / 50))
+    start, end = T0 + 60 * 86400, T0 + 255 * 86400
+    replay_quoted(st, bars, start, end)
+    # MODEL track still reproduces the backtest exactly (parity checks use it)
+    assert_parity(engine_trades(st, bars, start, end), paper_closed(st, end))
+    p = paper_closed(st, end)
+    o = dict(zip(bars["time"], bars["o"]))
+    long_ = p["dir"] > 0
+    ent_o = p["entry_time"].map(o)
+    np.testing.assert_allclose(p.loc[long_, "entry_exec"], ent_o[long_] * (1 + 0.0003))      # longs buy at the ask
+    np.testing.assert_allclose(p.loc[~long_, "entry_exec"], ent_o[~long_] * (1 - 0.0003))    # shorts sell at the bid
+    tx = p["exit_kind"].eq("time")
+    ex_o = p["exit_time"].map(o)
+    np.testing.assert_allclose(p.loc[tx & long_, "exit_exec"], ex_o[tx & long_] * (1 - 0.0003))
+    np.testing.assert_allclose(p.loc[tx & ~long_, "exit_exec"], ex_o[tx & ~long_] * (1 + 0.0003))
+    stp = p["exit_kind"].eq("stop")
+    assert stp.any() and np.allclose(p.loc[stp, "exit_exec"], p.loc[stp, "exit_price"])     # no quote at a stop
+    from core.engine import GST, TAKER
+    fees_x = TAKER * (1 + GST) * p["qty"] * (p["entry_exec"] + p["exit_exec"])
+    np.testing.assert_allclose(p["net_exec"], p["dir"] * (p["exit_exec"] - p["entry_exec"]) * p["qty"] - fees_x + p["funding"],
+                               rtol=1e-9, atol=1e-9)
+    assert p["net_exec"].sum() < p["net"].sum()      # crossing a 0.03% half-spread costs more than the 0.01% model
+    last = st.db.execute("SELECT exec_realized FROM equity ORDER BY bar_time DESC LIMIT 1").fetchone()["exec_realized"]
+    closed_all = st.db.execute("SELECT COALESCE(SUM(net_exec),0) s FROM positions WHERE status='closed'").fetchone()["s"]
+    assert last == pytest.approx(cfg(st)["capital"] + closed_all)
+
+
+def _with_rules(st):
+    with st.tx() as db:
+        st.set_meta("config", {"stop_rules": {"max_drawdown": 0.0483, "max_mismatch_rate": 0.05,
+                                              "max_avg_exec_cost": 0.0003, "min_fills_for_exec_cost": 10}}, db)
+
+
+def test_drawdown_pause_uses_executable_track(tmp_path):
+    from paper.trader import check_stop_rules
+    st = make_store(tmp_path, synthetic(days=40))
+    _with_rules(st)
+    with st.tx() as db:   # model track barely moves; executable track falls 6% from its peak
+        for i, (m_, x_) in enumerate([(10000, 10000), (10050, 10100), (10020, 9490), (10030, 9500)]):
+            db.execute("INSERT INTO equity(coin, bar_time, realized, unrealized, total, exec_realized, exec_unrealized, exec_total) "
+                       "VALUES('TESTUSD', ?, ?, 0, ?, ?, 0, ?)", (T0 + i * FOUR_H, m_, m_, x_, x_))
+    reason = check_stop_rules(st, T0 + 4 * FOUR_H)
+    assert reason and reason.startswith("executable-track drawdown")
+
+
+def test_exec_cost_pause_uses_mid_not_stale_last_price(tmp_path):
+    from paper.trader import check_stop_rules
+    st = make_store(tmp_path, synthetic(days=40))
+    _with_rules(st)
+    with st.tx() as db:   # stale LTP (0.10% off mid) but a tight book: must NOT pause
+        for i in range(12):
+            db.execute("INSERT INTO fills(position_id, coin, side, kind, bar_time, ref_price, model_price, qty, best_bid, best_ask, "
+                       "ltp, live_quote, mid, exec_price, exec_cost, staleness) VALUES(?, 'TESTUSD', 'sell', 'entry', ?, 41.0, 40.99, "
+                       "0.1, 40.96, 40.98, 41.0, 1, 40.97, 40.96, 0.000244, 0.000732)", (i, T0 + i * FOUR_H))
+    assert check_stop_rules(st, T0) is None
+    with st.tx() as db:   # a genuinely wide book: average execution cost 0.05% -> pause
+        db.execute("UPDATE fills SET exec_cost=0.0005")
+    reason = check_stop_rules(st, T0)
+    assert reason and reason.startswith("execution cost (book price vs mid)")
+
+
+def test_weekly_summary_shows_both_tracks_and_staleness(tmp_path):
+    from paper.trader import weekly_report
+    bars = synthetic()
+    st = make_store(tmp_path, bars)
+    start, end = T0 + 60 * 86400, T0 + 150 * 86400
+    replay_quoted(st, bars, start, end)
+    text = weekly_report(st, end, force=True)
+    for needle in ("MODEL track", "EXECUTABLE track", "Execution cost (book price vs mid)", "LTP staleness",
+                   "TESTUSD: +0.0700% / 0.0700%", "Reconciliation (model track vs backtest): 0 mismatches"):
+        assert needle in text, needle

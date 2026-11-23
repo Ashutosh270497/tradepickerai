@@ -56,10 +56,37 @@ def upload(etag: str | None):
     print(f"state uploaded to s3://{bucket}/{key} ({len(body)} bytes)", flush=True)
 
 
+def check(cfg_path: str):
+    """Connectivity check that creates NO state: Delta public API for every configured coin, the S3 state
+    location (should be empty before the first scheduled run), and Telegram."""
+    import json
+    from paper import delta_public as dp
+    cfg = json.loads(Path(cfg_path).read_text())
+    for c in cfg["coins"]:
+        q = dp.quote(c["coin"])
+        p = dp.product(c["coin"])
+        print(f"Delta OK {c['coin']}: bid {q['best_bid']} ask {q['best_ask']} last {q['ltp']} | contract {p['contract_value']}", flush=True)
+    if os.environ.get("PAPER_STATE_S3"):
+        s3, bucket, key = _s3()
+        try:
+            s3.head_object(Bucket=bucket, Key=key)
+            print(f"S3 OK: state EXISTS at s3://{bucket}/{key} - the paper period has already started", flush=True)
+        except Exception as e:
+            code = getattr(e, "response", {}).get("Error", {}).get("Code", type(e).__name__)
+            if code in ("404", "NoSuchKey", "NotFound"):
+                print(f"S3 OK: no state yet at s3://{bucket}/{key}; the first scheduled run will start the paper period", flush=True)
+            else:
+                raise
+    sent = alerts.send("[paper] connectivity check OK (no state created)")
+    print("Telegram OK" if sent else "Telegram NOT delivered (check TELEGRAM_* parameters)", flush=True)
+
+
 def main():
-    """Usage: python -m paper.run_task [run|status|reconcile|resume]   (default: run)"""
+    """Usage: python -m paper.run_task [run|check|status|reconcile|resume]   (default: run)"""
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     cfg = os.environ.get("PAPER_CONFIG", "/app/paper_config.json")
+    if cmd == "check":
+        return check(cfg)
     try:
         etag = download()
         if etag == "NEW" or not Path(LOCAL).exists():

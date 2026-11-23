@@ -5,6 +5,8 @@ import json
 import sqlite3
 from contextlib import contextmanager
 
+SCHEMA_VERSION = 2   # v2 (paper_trading_plan.md v2): execution cost vs mid, staleness, executable equity track
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS coins(coin TEXT PRIMARY KEY, capital REAL, lot REAL, tick REAL, funding_interval_h INTEGER,
@@ -18,15 +20,17 @@ CREATE TABLE IF NOT EXISTS positions(id INTEGER PRIMARY KEY AUTOINCREMENT, coin 
     entry_time INTEGER, entry_idx_time INTEGER, entry_price REAL, entry_ref REAL, stop REAL, stop_dist REAL,
     time_exit_time INTEGER, entry_fee REAL, equity_before REAL, capped INTEGER, status TEXT,
     exit_time INTEGER, exit_pos_hours REAL, exit_price REAL, exit_ref REAL, exit_kind TEXT, exit_fee REAL,
-    funding REAL DEFAULT 0, gross REAL, net REAL, R REAL, UNIQUE(coin, entry_time));
+    funding REAL DEFAULT 0, gross REAL, net REAL, R REAL,
+    entry_exec REAL, entry_fee_exec REAL, exit_exec REAL, exit_fee_exec REAL, gross_exec REAL, net_exec REAL,
+    UNIQUE(coin, entry_time));
 CREATE TABLE IF NOT EXISTS fills(id INTEGER PRIMARY KEY AUTOINCREMENT, position_id INTEGER, coin TEXT, side TEXT,
     kind TEXT, bar_time INTEGER, decided_at INTEGER, ref_price REAL, model_price REAL, qty REAL,
     best_bid REAL, best_ask REAL, bid_size REAL, ask_size REAL, mark REAL, ltp REAL, quote_time INTEGER,
-    live_quote INTEGER, UNIQUE(position_id, kind));
+    live_quote INTEGER, mid REAL, exec_price REAL, exec_cost REAL, staleness REAL, UNIQUE(position_id, kind));
 CREATE TABLE IF NOT EXISTS funding_applied(position_id INTEGER, coin TEXT, settle_time INTEGER, rate REAL, price REAL,
     qty REAL, pnl REAL, PRIMARY KEY(position_id, settle_time));
 CREATE TABLE IF NOT EXISTS equity(coin TEXT, bar_time INTEGER, realized REAL, unrealized REAL, total REAL,
-    PRIMARY KEY(coin, bar_time));
+    exec_realized REAL, exec_unrealized REAL, exec_total REAL, PRIMARY KEY(coin, bar_time));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER, level TEXT, coin TEXT, message TEXT);
 CREATE TABLE IF NOT EXISTS weekly(week_start INTEGER PRIMARY KEY, created_at INTEGER, summary TEXT,
     recon_trades INTEGER, recon_mismatches INTEGER);
@@ -41,6 +45,11 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        v = self.get_meta("schema_version")
+        if v is None:
+            self.set_meta("schema_version", SCHEMA_VERSION)
+        elif v != SCHEMA_VERSION:
+            raise RuntimeError(f"state schema v{v} != code v{SCHEMA_VERSION}: start a fresh paper period (plan v2)")
 
     @contextmanager
     def tx(self):

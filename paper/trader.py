@@ -81,35 +81,50 @@ def cmd_init(a):
               f"{n} candles stored")
 
 
-def check_stop_rules(store: Store, T: int) -> str | None:
-    cfg = store.get_meta("config")
-    rules = cfg["stop_rules"]
-    eq = pd.DataFrame([dict(r) for r in store.db.execute("SELECT bar_time, SUM(total) total FROM equity GROUP BY bar_time ORDER BY bar_time")])
+def track_drawdown(store: Store, column: str = "exec_total") -> float:
+    """Max drawdown of the combined account (sum of sub-accounts) on the executable (default) or model track."""
+    assert column in ("exec_total", "total")
+    eq = pd.DataFrame([dict(r) for r in store.db.execute(
+        f"SELECT bar_time, SUM({column}) v FROM equity GROUP BY bar_time ORDER BY bar_time")])
     caps = sum(c["capital"] for c in store.coins())
-    if len(eq):
-        curve = np.r_[caps, eq["total"].to_numpy()]
-        dd = float((1 - curve / np.maximum.accumulate(curve)).max())
-        if dd > rules["max_drawdown"]:
-            return f"paper drawdown {dd * 100:.2f}% exceeds the limit {rules['max_drawdown'] * 100:.2f}% (2x backtest max DD)"
-    fills = pd.DataFrame([dict(r) for r in store.db.execute("SELECT * FROM fills WHERE live_quote=1")])
-    if len(fills) >= rules["min_fills_for_slippage"]:
-        s = measured_slippage(fills)["vs_ltp"].mean()
-        if s > rules["max_avg_slippage"]:
-            return f"measured slippage averages {s * 100:.4f}% per side, above {rules['max_avg_slippage'] * 100:.3f}%"
+    if not len(eq):
+        return 0.0
+    curve = np.r_[caps, eq["v"].to_numpy()]
+    return float((1 - curve / np.maximum.accumulate(curve)).max())
+
+
+def check_stop_rules(store: Store, T: int) -> str | None:
+    """Plan v2 pause rules: drawdown on the EXECUTABLE track; execution cost vs mid; reconciliation mismatches."""
+    rules = store.get_meta("config")["stop_rules"]
+    dd = track_drawdown(store, "exec_total")
+    if dd > rules["max_drawdown"]:
+        return (f"executable-track drawdown {dd * 100:.2f}% exceeds the limit {rules['max_drawdown'] * 100:.2f}% "
+                f"(2x backtest max DD)")
+    costs = [r["exec_cost"] for r in store.db.execute("SELECT exec_cost FROM fills WHERE exec_cost IS NOT NULL")]
+    if len(costs) >= rules["min_fills_for_exec_cost"]:
+        avg = float(np.mean(costs))
+        if avg > rules["max_avg_exec_cost"]:
+            return (f"execution cost (book price vs mid) averages {avg * 100:.4f}% per side over {len(costs)} fills, "
+                    f"above {rules['max_avg_exec_cost'] * 100:.3f}%")
     last = store.db.execute("SELECT * FROM weekly ORDER BY week_start DESC LIMIT 1").fetchone()
     if last and last["recon_trades"] and last["recon_mismatches"] / last["recon_trades"] > rules["max_mismatch_rate"]:
         return f"reconciliation mismatches {last['recon_mismatches']}/{last['recon_trades']} exceed {rules['max_mismatch_rate'] * 100:.0f}% of trades"
     return None
 
 
-def measured_slippage(fills: pd.DataFrame) -> pd.DataFrame:
-    """Per live fill: cost of crossing the book vs the model's reference price (last traded price) and the
-    half-spread vs mid. Buys pay the ask, sells hit the bid."""
-    buy = fills["side"].eq("buy")
-    exec_px = np.where(buy, fills["best_ask"], fills["best_bid"])
-    vs_ltp = np.where(buy, exec_px / fills["ref_price"] - 1, 1 - exec_px / fills["ref_price"])
-    mid = (fills["best_ask"] + fills["best_bid"]) / 2
-    return pd.DataFrame({"vs_ltp": vs_ltp, "half_spread": (fills["best_ask"] - fills["best_bid"]) / 2 / mid})
+def fill_metrics(store: Store) -> pd.DataFrame:
+    """Plan v2 per-coin fill metrics: execution cost vs mid (the pause/go-live metric) and LTP staleness
+    (diagnostic): signed and absolute averages."""
+    f = pd.DataFrame([dict(r) for r in store.db.execute(
+        "SELECT coin, exec_cost, staleness FROM fills WHERE exec_cost IS NOT NULL")])
+    if not len(f):
+        return pd.DataFrame(columns=["fills", "exec_cost_avg", "staleness_signed_avg", "staleness_abs_avg"])
+    g = f.groupby("coin")
+    out = pd.DataFrame({"fills": g.size(), "exec_cost_avg": g["exec_cost"].mean(),
+                        "staleness_signed_avg": g["staleness"].mean(),
+                        "staleness_abs_avg": g["staleness"].apply(lambda x: x.abs().mean())})
+    out.loc["ALL"] = [len(f), f["exec_cost"].mean(), f["staleness"].mean(), f["staleness"].abs().mean()]
+    return out
 
 
 def weekly_report(store: Store, T: int, force: bool = False) -> str | None:
@@ -119,25 +134,36 @@ def weekly_report(store: Store, T: int, force: bool = False) -> str | None:
         return None
     rec = reconcile(store, T)
     coins = store.coins()
-    lines = [f"Weekly paper report to {pd.to_datetime(T, unit='s'):%Y-%m-%d %H:%M} UTC"]
-    tot, cap = 0.0, 0.0
+    lines = [f"Weekly paper report to {pd.to_datetime(T, unit='s'):%Y-%m-%d %H:%M} UTC",
+             "Equity per coin: MODEL track (LTP +/- 0.01%; used for backtest parity) | EXECUTABLE track (book ask/bid; "
+             "used for return, drawdown and the drawdown pause)"]
+    tot = tot_x = cap = 0.0
     for c in coins:
-        e = store.db.execute("SELECT total FROM equity WHERE coin=? ORDER BY bar_time DESC LIMIT 1", (c["coin"],)).fetchone()
-        val = e["total"] if e else c["capital"]
-        tot, cap = tot + val, cap + c["capital"]
+        e = store.db.execute("SELECT total, exec_total FROM equity WHERE coin=? ORDER BY bar_time DESC LIMIT 1", (c["coin"],)).fetchone()
+        val, val_x = (e["total"], e["exec_total"]) if e else (c["capital"], c["capital"])
+        tot, tot_x, cap = tot + val, tot_x + val_x, cap + c["capital"]
         op = store.open_position(c["coin"])
-        lines.append(f"{c['coin']}: equity {val:.2f} ({(val / c['capital'] - 1) * 100:+.2f}%)" +
+        lines.append(f"{c['coin']}: {val:.2f} ({(val / c['capital'] - 1) * 100:+.2f}%) | {val_x:.2f} ({(val_x / c['capital'] - 1) * 100:+.2f}%)" +
                      (f", open {'long' if op['dir'] > 0 else 'short'} {op['qty']:g} since {pd.to_datetime(op['entry_time'], unit='s'):%m-%d %H:%M}" if op else ", flat"))
     fund = store.db.execute("SELECT COALESCE(SUM(pnl),0) s FROM funding_applied").fetchone()["s"]
-    closed = store.db.execute("SELECT COUNT(*) n, COALESCE(SUM(net),0) s FROM positions WHERE status='closed'").fetchone()
-    fills = pd.DataFrame([dict(r) for r in store.db.execute("SELECT * FROM fills WHERE live_quote=1")])
-    slip = measured_slippage(fills) if len(fills) else None
-    lines += [f"Total equity {tot:.2f} on {cap:.2f} ({(tot / cap - 1) * 100:+.2f}%); closed trades {closed['n']}, net {closed['s']:+.2f}",
-              f"Funding paid/received: {fund:+.2f} USD",
-              (f"Measured slippage vs model price: avg {slip['vs_ltp'].mean() * 100:.4f}% per side over {len(slip)} live fills "
-               f"(assumption 0.0100%); avg half-spread {slip['half_spread'].mean() * 100:.4f}%") if slip is not None else
-              "Measured slippage: no live fills yet",
-              f"Reconciliation: {rec['mismatches']} mismatches in {rec['trades']} trades ({rec['rate'] * 100:.1f}%)"]
+    closed = store.db.execute("SELECT COUNT(*) n, COALESCE(SUM(net),0) s, COALESCE(SUM(net_exec),0) sx "
+                              "FROM positions WHERE status='closed'").fetchone()
+    fm = fill_metrics(store)
+    lines += [f"Total: model {tot:.2f} ({(tot / cap - 1) * 100:+.2f}%), max DD {track_drawdown(store, 'total') * 100:.2f}% | "
+              f"executable {tot_x:.2f} ({(tot_x / cap - 1) * 100:+.2f}%), max DD {track_drawdown(store, 'exec_total') * 100:.2f}% "
+              f"on {cap:.2f}",
+              f"Closed trades {closed['n']}: net {closed['s']:+.2f} model, {closed['sx']:+.2f} executable",
+              f"Funding paid/received: {fund:+.2f} USD (same on both tracks)"]
+    if len(fm):
+        a = fm.loc["ALL"]
+        lines.append(f"Execution cost (book price vs mid): avg {a['exec_cost_avg'] * 100:.4f}% per side over {int(a['fills'])} fills "
+                     f"(model assumes 0.0100%; pause above 0.03%)")
+        lines.append("LTP staleness (last price - mid), per coin: signed avg / absolute avg")
+        lines += [f"  {coin}: {r['staleness_signed_avg'] * 100:+.4f}% / {r['staleness_abs_avg'] * 100:.4f}% "
+                  f"(exec cost {r['exec_cost_avg'] * 100:.4f}%, {int(r['fills'])} fills)" for coin, r in fm.drop(index="ALL").iterrows()]
+    else:
+        lines.append("Execution cost / staleness: no fills with a live order book yet")
+    lines += [f"Reconciliation (model track vs backtest): {rec['mismatches']} mismatches in {rec['trades']} trades ({rec['rate'] * 100:.1f}%)"]
     lines += [f"  - {r['coin']} {r['entry']:%Y-%m-%d %H:%M} {r['type']}: {r['cause']}" for r in rec["rows"]]
     text = "\n".join(lines)
     with store.tx() as db:
@@ -208,7 +234,8 @@ def cmd_status(a):
     for c in store.coins():
         op = store.open_position(c["coin"])
         e = store.db.execute("SELECT * FROM equity WHERE coin=? ORDER BY bar_time DESC LIMIT 1", (c["coin"],)).fetchone()
-        print(f"{c['coin']}: capital {c['capital']:.2f}, equity {e['total'] if e else c['capital']:.2f}, "
+        print(f"{c['coin']}: capital {c['capital']:.2f}, equity model {e['total'] if e else c['capital']:.2f} / "
+              f"executable {e['exec_total'] if e else c['capital']:.2f}, "
               + (f"open {'long' if op['dir'] > 0 else 'short'} {op['qty']:g} @ {op['entry_price']:.6g}, stop {op['stop']:.6g}, "
                  f"time exit {pd.to_datetime(op['time_exit_time'], unit='s')}" if op else "flat"))
     print("paused:", store.get_meta("paused"))

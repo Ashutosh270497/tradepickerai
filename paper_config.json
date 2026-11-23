@@ -1,5 +1,5 @@
 {
-  "description": "Shadow paper trading of the frozen 4h trend filter (frozen_rules.md). Budget $2,500 chosen by the user on 2026-11-23; split chosen by the user: BTC $1,400, ETH $600, XRP/BCH/LTC ~$167. One sub-account per coin, 0.5% risk per trade of that sub-account. No secrets in this file.",
+  "description": "Shadow paper trading of the frozen 4h trend filter (frozen_rules.md). Budget $2,500 chosen by the user on 2026-11-23; split chosen by the user: BTC $1,400, ETH $600, XRP/BCH/LTC ~$167. One sub-account per coin, 0.5% risk per trade of that sub-account. Plan v2 (paper_trading_plan.md). No secrets in this file.",
   "budget_usd": 2500,
   "coins": [
     {
@@ -25,9 +25,11 @@
   ],
   "stop_rules": {
     "max_drawdown": 0.04832,
+    "drawdown_track": "executable",
     "max_mismatch_rate": 0.05,
-    "max_avg_slippage": 0.0003,
-    "min_fills_for_slippage": 10
+    "max_avg_exec_cost": 0.0003,
+    "exec_cost_definition": "per fill: (ask - mid)/mid for buys, (mid - bid)/mid for sells, same order-book snapshot",
+    "min_fills_for_exec_cost": 10
   },
   "reference_backtest": {
     "source": "logs/paper_plan_stats.json (python3 -m paper.plan_stats)",
@@ -36,5 +38,6 @@
     "trades_per_year": 99.3,
     "bootstrap_6m_return_pct_p5": -0.857,
     "bootstrap_12m_return_pct_p5": -0.326
-  }
+  },
+  "plan_version": 2
 }

@@ -24,6 +24,7 @@ Fargate wins on cost, maintenance and restart safety for a job that runs 6 times
 | S3 state (a few MB; noncurrent versions expire after 30 days) | ~180 versions/month | ≈ $0.03 |
 | ECR image storage | ~0.4 GB | ≈ $0.04 |
 | EventBridge Scheduler, SSM Parameter Store (standard) | ~180 invocations; 2 parameters | free |
+| NAT gateway | **none**: the task runs in a public subnet with a public IP | $0 |
 | **Total** | | **≈ $0.20–0.60** |
 
 **Pricing assumption (flagged):** I could not retrieve AWS's Mumbai Fargate ARM rate, so the Fargate line uses the published US East ARM rates ($0.03238 per vCPU-hour, $0.00356 per GB-hour) as a proxy; Mumbai's rates are similar. Even at double those rates the total stays well under $1. EC2 figures are from third-party price trackers (t4g.nano ≈ $0.0028/hour in Mumbai). Confirm both in the [AWS Pricing Calculator](https://calculator.aws/) before relying on them.
@@ -36,6 +37,8 @@ Fargate wins on cost, maintenance and restart safety for a job that runs 6 times
   2. Send any message to your new bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` in your browser and copy `"chat":{"id": ...}`. That is your **chat id**.
   3. **Never** put the token in git, in `paper_config.json` or in the image. It goes into SSM Parameter Store below.
 - **Region:** everything below is in **ap-south-1**. An Indian region also keeps your IP local to Delta India's public API. The first manual run checks the API is reachable from AWS.
+
+**Paper period start:** per `paper_trading_plan.md` v2, the 12-month period begins with a **fresh init on the first scheduled run** (step 9). Before that, only the no-state `check` task (step 8) is run by hand.
 
 Set these once in your shell (replace the bucket name with a globally unique one):
 
@@ -51,7 +54,25 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export BUCKET=paper-trader-state-$ACCOUNT_ID
 ```
 
-## 1. S3 bucket for the state (private, versioned)
+## 1. Budget alert at $5 a month (do this first)
+
+The expected bill is under $1 a month, so a $5 alert catches any mistake early, such as an accidental NAT gateway or a runaway task. Replace `YOUR_EMAIL` in the second file:
+
+```bash
+echo '{"BudgetName":"paper-trader-monthly","BudgetLimit":{"Amount":"5","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' > /tmp/budget.json
+```
+
+```bash
+echo '[{"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":100,"ThresholdType":"PERCENTAGE"},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"YOUR_EMAIL"}]},{"Notification":{"NotificationType":"FORECASTED","ComparisonOperator":"GREATER_THAN","Threshold":100,"ThresholdType":"PERCENTAGE"},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"YOUR_EMAIL"}]}]' > /tmp/budget-notify.json
+```
+
+```bash
+aws budgets create-budget --account-id $ACCOUNT_ID --budget file:///tmp/budget.json --notifications-with-subscribers file:///tmp/budget-notify.json
+```
+
+You'll get an email when actual or forecast spend for the month goes above $5. AWS Budgets bills in USD, and the first two budgets per account are free.
+
+## 2. S3 bucket for the state (private, versioned)
 
 ```bash
 aws s3api create-bucket --bucket $BUCKET --create-bucket-configuration LocationConstraint=$AWS_REGION
@@ -69,7 +90,7 @@ aws s3api put-bucket-versioning --bucket $BUCKET --versioning-configuration Stat
 aws s3api put-bucket-lifecycle-configuration --bucket $BUCKET --lifecycle-configuration '{"Rules":[{"ID":"expire-old-state-versions","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":30}}]}'
 ```
 
-## 2. Container image in ECR (ARM64)
+## 3. Container image in ECR (ARM64)
 
 ```bash
 aws ecr create-repository --repository-name paper-trader --image-scanning-configuration scanOnPush=true
@@ -85,7 +106,7 @@ docker buildx build --platform linux/arm64 -t $ACCOUNT_ID.dkr.ecr.$AWS_REGION.am
 
 Use a new tag (`v2`, …) for every change, and record which commit each tag was built from. The image contains `frozen_rules.md`, `paper_trading_plan.md` and `paper_config.json` as they were when built.
 
-## 3. Logs and secrets
+## 4. Logs and secrets
 
 ```bash
 aws logs create-log-group --log-group-name /ecs/paper-trader
@@ -105,7 +126,7 @@ aws ssm put-parameter --name /paper-trader/TELEGRAM_CHAT_ID --type SecureString 
 
 Run the two `put-parameter` commands yourself and paste the values only into your own terminal, not into chat or files.
 
-## 4. IAM roles
+## 5. IAM roles
 
 Three roles are needed:
 - **Execution role:** lets ECS pull the image, write logs and read the two SSM parameters.
@@ -154,7 +175,7 @@ aws iam create-role --role-name paperTraderSchedulerRole --assume-role-policy-do
 aws iam put-role-policy --role-name paperTraderSchedulerRole --policy-name run-paper-task --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ecs:RunTask\",\"Resource\":\"arn:aws:ecs:$AWS_REGION:$ACCOUNT_ID:task-definition/paper-trader:*\"},{\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":[\"arn:aws:iam::$ACCOUNT_ID:role/paperTraderExecutionRole\",\"arn:aws:iam::$ACCOUNT_ID:role/paperTraderTaskRole\"]}]}"
 ```
 
-## 5. ECS cluster and task definition
+## 6. ECS cluster and task definition
 
 ```bash
 aws ecs create-cluster --cluster-name paper-trader
@@ -194,7 +215,9 @@ EOF
 aws ecs register-task-definition --cli-input-json file:///tmp/taskdef.json
 ```
 
-## 6. Networking (default VPC, outbound only)
+## 7. Networking: public subnet, public IP, **no NAT gateway**
+
+> **Warning: do not add a NAT gateway.** The task needs outbound internet (Delta, Telegram, S3, SSM). The cheap way is a **public subnet** (one whose route table sends `0.0.0.0/0` to an internet gateway) with **`assignPublicIp=ENABLED`**, which is what every command below uses. A NAT gateway costs roughly $0.05–0.06 an hour plus data processing, **about $35–45 a month, i.e. tens of dollars**, more than 50 times the rest of this deployment. If a guide, console wizard or template offers a "private subnet + NAT", decline it.
 
 ```bash
 export VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
@@ -210,25 +233,40 @@ export SG_ID=$(aws ec2 create-security-group --group-name paper-trader-egress --
 
 The new security group has no inbound rules, and its default outbound rule allows the HTTPS calls to Delta, Telegram, S3 and SSM.
 
-## 7. First run by hand (initialises the state)
+**Check that the subnets really are public.** Each should show an `igw-…` target for `0.0.0.0/0`, never `nat-…`. A subnet with no explicit route-table association prints nothing and uses the VPC's main route table, which in the **default VPC** routes to an internet gateway.
 
 ```bash
-aws ecs run-task --cluster paper-trader --launch-type FARGATE --task-definition paper-trader --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+for s in ${SUBNETS//,/ }; do echo "$s -> $(aws ec2 describe-route-tables --filters Name=association.subnet-id,Values=$s --query "RouteTables[].Routes[?DestinationCidrBlock=='0.0.0.0/0'].GatewayId" --output text)"; done
+```
+
+Then confirm the account has no NAT gateway you didn't intend; this should print nothing:
+
+```bash
+aws ec2 describe-nat-gateways --filter Name=state,Values=available,pending --query 'NatGateways[].NatGatewayId' --output text
+```
+
+## 8. Connectivity check by hand (creates NO state)
+
+This one-off task checks that Delta's public API, the S3 state location and Telegram all work from AWS. It writes nothing, so the paper period still starts with the first scheduled run.
+
+```bash
+aws ecs run-task --cluster paper-trader --launch-type FARGATE --task-definition paper-trader --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" --overrides '{"containerOverrides":[{"name":"paper-trader","command":["check"]}]}'
 ```
 
 ```bash
 aws logs tail /ecs/paper-trader --follow
 ```
 
-A good first run prints:
-- the five coins with their contract sizes;
-- `processed 4h close …`;
-- any entries;
-- `state uploaded to s3://…`.
+A good check prints:
+- a `Delta OK …` line for each of the five coins (bid, ask, last price, contract size);
+- `S3 OK: no state yet …`;
+- `Telegram OK` (and the test message arrives in Telegram).
 
-You should also get the entry alerts in Telegram. If the logs show Delta requests failing, Delta's public API is not reachable from AWS: stop and tell me before scheduling.
+If Delta requests fail, Delta's public API is not reachable from AWS: stop and tell me before scheduling. If S3 reports that state **exists**, a run has already happened: delete that object and its versions before scheduling, so the period starts fresh.
 
-## 8. Schedule: every 4 hours, 5 minutes after the bar closes (UTC)
+## 9. Schedule: every 4 hours, 5 minutes after the bar closes (UTC)
+
+**The first scheduled run initialises a fresh state and starts the 12-month paper period** (plan v2). Note its date and time.
 
 ```bash
 cat > /tmp/target.json <<EOF
@@ -249,9 +287,15 @@ EOF
 aws scheduler create-schedule --name paper-trader-4h --schedule-expression "cron(5 0/4 * * ? *)" --schedule-expression-timezone UTC --flexible-time-window Mode=OFF --target file:///tmp/target.json
 ```
 
-A retried or duplicated start is harmless: a bar that is already processed is skipped, and the conditional S3 upload rejects a stale copy.
+A retried or duplicated start is harmless: a bar that is already processed is skipped, and the conditional S3 upload rejects a stale copy. The schedule's network configuration above uses the same public subnets with `AssignPublicIp: ENABLED`, so no NAT gateway is involved.
 
-## 9. Alarm when a run fails (recommended)
+After the first scheduled run, `aws logs tail /ecs/paper-trader --since 30m` should show:
+- `no state in S3 yet: first run`;
+- the five coins initialised;
+- `processed 4h close …`;
+- `state uploaded to s3://…`.
+
+## 10. Alarm when a run fails (recommended)
 
 The entrypoint logs `RUN FAILED` and sends it to Telegram. To also get an email:
 
@@ -271,7 +315,7 @@ aws logs put-metric-filter --log-group-name /ecs/paper-trader --filter-name run-
 aws cloudwatch put-metric-alarm --alarm-name paper-trader-run-failed --namespace PaperTrader --metric-name PaperRunFailed --statistic Sum --period 3600 --evaluation-periods 1 --threshold 1 --comparison-operator GreaterThanOrEqualToThreshold --treat-missing-data notBreaching --alarm-actions arn:aws:sns:$AWS_REGION:$ACCOUNT_ID:paper-trader-alarms
 ```
 
-## 10. Day-to-day operations
+## 11. Day-to-day operations
 
 The trader runs itself. For a manual check, start a one-off task with a different command:
 
@@ -279,7 +323,7 @@ The trader runs itself. For a manual check, start a one-off task with a differen
 aws ecs run-task --cluster paper-trader --launch-type FARGATE --task-definition paper-trader --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" --overrides '{"containerOverrides":[{"name":"paper-trader","command":["status"]}]}'
 ```
 
-- **Other commands:** use `"command":["reconcile"]` (weekly report on demand) or `"command":["resume"]` (only after a written review of a pause).
+- **Other commands:** use `"command":["reconcile"]` (weekly report on demand, both equity tracks), `"command":["check"]` (connectivity, no state change) or `"command":["resume"]` (only after a written review of a pause).
 - **Output:** read it with `aws logs tail /ecs/paper-trader --since 10m`.
 - **Download the database for analysis** (e.g. with the `sqlite3` CLI):
 
@@ -296,5 +340,6 @@ aws scheduler update-schedule --name paper-trader-4h --state DISABLED --schedule
 ## What this deployment must never contain
 
 - Exchange API keys of any kind. This phase uses public data only.
+- A NAT gateway (see step 7).
 - The Telegram token anywhere except SSM Parameter Store.
 - Edits to `frozen_rules.md` or `paper_trading_plan.md`. A change means a new plan, a new commit and a new paper period.

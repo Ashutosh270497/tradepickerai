@@ -79,7 +79,7 @@ The engine refactor that exposed these left Phases 2–4 byte-identical.
 - **The Docker image works:** it built and ran the same cycle end to end; a second container run also did nothing.
 - **Telegram:** not configured here, and its host isn't allowed in this environment, so alerts were logged instead of sent.
 
-**Finding to act on before deploying.** Measured slippage averaged **0.028% per side**, close to the plan's 0.03% pause threshold. It comes from LTC and BCH, whose last trade was stale relative to the order book; BTC and ETH were 0.001–0.003%, and the real half-spread averaged 0.009%. Because the plan measures slippage against the last traded price, thinly traded coins could trigger the slippage pause even when the real cost is small. That's your call; see the end of this section.
+**Finding to act on before deploying.** Measured slippage averaged **0.028% per side**, close to the plan's 0.03% pause threshold. It comes from LTC and BCH, whose last trade was stale relative to the order book; BTC and ETH were 0.001–0.003%, and the real half-spread averaged 0.009%. Because the plan measures slippage against the last traded price, thinly traded coins could trigger the slippage pause even when the real cost is small. **Resolved in plan v2** (below).
 
 ## Steps 3–5: reconciliation, alerts, plan, deployment
 
@@ -88,13 +88,22 @@ The engine refactor that exposed these left Phases 2–4 byte-identical.
   - Matches trades by coin, entry bar and direction.
   - Flags every trade found in only one log, or with a different exit type or bar, with a likely cause: missed run, stop level shifted by the live entry price, or unexplained.
   - Lists price differences above 0.2%.
-- **Telegram:** an alert for every entry, exit and skip, plus a weekly summary (equity, open positions, funding, measured slippage vs 0.01%, reconciliation). The token comes from `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` environment variables only.
-- **[`paper_trading_plan.md`](paper_trading_plan.md)** was committed (`4a802b3`, 12:19 UTC) **before** the paper trader ran. It contains:
+- **Telegram:** an alert for every entry, exit and skip, plus a weekly summary (both equity tracks, open positions, funding, execution cost vs mid, per-coin LTP staleness, reconciliation). The token comes from `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` environment variables only.
+- **[`paper_trading_plan.md`](paper_trading_plan.md)** v1 was committed (`4a802b3`, 12:19 UTC) **before** the paper trader ran. It contains:
   - the review point (6 months or 100 closed trades, whichever comes later);
   - the pause rules: drawdown > 4.83%, reconciliation mismatches > 5% of trades, average slippage > 0.03% per side;
   - six pre-set "go live with small money" criteria.
+- **Plan v2** (committed before go-live; the change log is in the plan):
+  - **Execution cost:** the slippage pause and go-live criterion now use execution cost vs mid in the same order-book snapshot (dry run: 0.0089% vs the 0.0284% measured against the last price).
+  - **Staleness:** LTP staleness is reported per coin as a diagnostic, with no rule attached.
+  - **Executable equity track:** fills at the recorded ask/bid. It drives the return and drawdown criteria and the drawdown pause; the model track stays the basis for backtest parity.
+  - **Fresh start:** the dry-run state was discarded, and the paper period begins with a fresh init on the first scheduled AWS run.
+  - **Tests:** 32 pass, including new tests for the metrics, the executable track and the v2 pause rules.
 - **Deployment** ([`docs/deploy_aws.md`](docs/deploy_aws.md)):
   - an ECS Fargate scheduled task in ap-south-1 every 4h at :05 UTC;
+  - a **public subnet with `assignPublicIp=ENABLED` and no NAT gateway** (a NAT would cost tens of dollars a month);
+  - a **$5/month AWS Budgets alert**;
+  - a no-state connectivity `check` before scheduling;
   - state in versioned S3 with conditional writes, logs in CloudWatch, the Telegram token in SSM;
   - estimated **$0.20–0.60 a month**, vs about $6–7 for an always-on t4g.nano.
 
