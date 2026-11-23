@@ -54,7 +54,7 @@ def build(df: pd.DataFrame, filt: str, exit_cfg) -> dict:
 
 def report(df, s, start, funding, capital) -> dict:
     trades, eq = simulate(df, s, start, TAKER, funding)
-    idx, side, gross = (np.array(x) for x in zip(*trades))
+    idx, side, gross, _ = (np.array(x) for x in zip(*trades))
     net = gross - 2 * TAKER
     half = start + (len(df) - start) // 2
     days = (len(df) - start) * STEP / 86400

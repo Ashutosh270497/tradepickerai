@@ -231,7 +231,11 @@ def load_funding(symbol: str, df: pd.DataFrame, step: int) -> np.ndarray:
     return (merged["close"].fillna(0.01).to_numpy() / 100) * step / 28800
 
 
-def simulate(df: pd.DataFrame, s: dict, start: int, cost: float, funding: np.ndarray | None = None):
+def simulate(df: pd.DataFrame, s: dict, start: int, cost: float, funding: np.ndarray | None = None,
+             max_bars: int | None = None):
+    """Returns (trades, equity). Each trade is (exit_idx, direction, gross, duration_in_candles).
+
+    max_bars: time stop; the trade is closed at the close of its max_bars-th candle."""
     o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     day = (df["time"].to_numpy() + IST_OFFSET) // 86400
     fund_paid = 0.0
@@ -241,39 +245,42 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float, funding: np.nda
     pos, entry, stop, tp = 0, 0.0, np.nan, np.nan
     realised = 0.0
     eq = np.zeros(n)
-    trades = []  # (exit_idx, direction, gross)
+    trades = []
+    entry_idx = 0
     want_exit, want_entry, want_stop = False, 0, np.nan
 
-    def close_at(price, t):
+    def close_at(price, t, dur):
         nonlocal pos, realised, fund_paid
         gross = pos * (price / entry - 1) - fund_paid
         fund_paid = 0.0
         realised += gross - 2 * cost
-        trades.append((t, pos, gross))
+        trades.append((t, pos, gross, dur))
         pos = 0
 
     for t in range(start, n):
         if want_exit and pos:
-            close_at(o[t], t)
+            close_at(o[t], t, t - entry_idx)
         if day[t] != cur_day:
             cur_day, entries_today = day[t], 0
         if want_entry and not pos and entries_today < MAX_TRADES_PER_DAY:
             entries_today += 1
-            pos, entry = want_entry, o[t]
+            pos, entry, entry_idx = want_entry, o[t], t
             stop = entry - pos * want_stop if want_stop == want_stop else np.nan
             tp = entry + pos * rr * want_stop if (rr and want_stop == want_stop) else np.nan
         if pos and funding is not None:
             fund_paid += pos * funding[t]
         if pos > 0:
             if l[t] <= stop:
-                close_at(min(o[t], stop), t)
+                close_at(min(o[t], stop), t, t - entry_idx + 0.5)
             elif h[t] >= tp:
-                close_at(max(o[t], tp), t)
+                close_at(max(o[t], tp), t, t - entry_idx + 0.5)
         elif pos < 0:
             if h[t] >= stop:
-                close_at(max(o[t], stop), t)
+                close_at(max(o[t], stop), t, t - entry_idx + 0.5)
             elif l[t] <= tp:
-                close_at(min(o[t], tp), t)
+                close_at(min(o[t], tp), t, t - entry_idx + 0.5)
+        if pos and max_bars and t - entry_idx >= max_bars - 1:
+            close_at(c[t], t, t - entry_idx + 0.99)  # closed just before the candle ends
 
         want_exit = bool(pos and ((pos > 0 and (lx[t] or se[t])) or (pos < 0 and (sx[t] or le[t]))))
         want_entry, want_stop = 0, np.nan
@@ -284,7 +291,7 @@ def simulate(df: pd.DataFrame, s: dict, start: int, cost: float, funding: np.nda
                 want_entry, want_stop = -1, (stop_s[t] if stop_s is not None else np.nan)
         eq[t] = realised + (pos * (c[t] / entry - 1) - cost - fund_paid if pos else 0.0)
     if pos:
-        close_at(c[-1], n - 1)
+        close_at(c[-1], n - 1, n - entry_idx)
         eq[-1] = realised
     return trades, eq[start:]
 
@@ -293,7 +300,7 @@ def evaluate(df: pd.DataFrame, s: dict, start: int, funding: np.ndarray | None =
     trades, eq = simulate(df, s, start, TAKER, funding)
     if not trades:
         return {"trades": 0}
-    idx, side, gross = (np.array(x) for x in zip(*trades))
+    idx, side, gross, _ = (np.array(x) for x in zip(*trades))
     net = gross - 2 * TAKER
     wins, losses = net[net > 0].sum(), -net[net <= 0].sum()
     half = start + (len(df) - start) // 2
