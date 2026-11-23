@@ -1,0 +1,422 @@
+{
+ "SOLUSD": {
+  "binance": "SOLUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 69992923.95349997,
+  "name": "Solana"
+ },
+ "XRPUSD": {
+  "binance": "XRPUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 7476259.014300019,
+  "name": "Ripple"
+ },
+ "ZECUSD": {
+  "binance": "ZECUSDT",
+  "contract_value": 0.1,
+  "tick": 0.01,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 3618809.376,
+  "name": "Zcash"
+ },
+ "UNIUSD": {
+  "binance": "UNIUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 2962386.172500001,
+  "name": "Uniswap"
+ },
+ "BNBUSD": {
+  "binance": "BNBUSDT",
+  "contract_value": 0.1,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 2197217.046699999,
+  "name": "BNB"
+ },
+ "DOGEUSD": {
+  "binance": "DOGEUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-06,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 1716609.8374000008,
+  "name": "Dogecoin"
+ },
+ "AAVEUSD": {
+  "binance": "AAVEUSDT",
+  "contract_value": 1.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 1213572.0809999998,
+  "name": "Aave"
+ },
+ "BCHUSD": {
+  "binance": "BCHUSDT",
+  "contract_value": 0.01,
+  "tick": 0.01,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 952589.3405000002,
+  "name": "Bitcoin Cash"
+ },
+ "LTCUSD": {
+  "binance": "LTCUSDT",
+  "contract_value": 0.1,
+  "tick": 0.01,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 748691.1600000001,
+  "name": "Litecoin"
+ },
+ "LINKUSD": {
+  "binance": "LINKUSDT",
+  "contract_value": 1.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 636406.2760000003,
+  "name": "Chainlink"
+ },
+ "AVAXUSD": {
+  "binance": "AVAXUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 565911.7044000002,
+  "name": "Avalanche"
+ },
+ "XMRUSD": {
+  "binance": "XMRUSDT",
+  "contract_value": 0.01,
+  "tick": 0.01,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 306584.89589999994,
+  "name": "Monero"
+ },
+ "DOTUSD": {
+  "binance": "DOTUSDT",
+  "contract_value": 1.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 302321.06499999994,
+  "name": "Polkadot"
+ },
+ "NEARUSD": {
+  "binance": "NEARUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 278696.5847,
+  "name": "NEAR Protocol"
+ },
+ "ADAUSD": {
+  "binance": "ADAUSDT",
+  "contract_value": 1.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 210990.31977000012,
+  "name": "Cardano"
+ },
+ "FILUSD": {
+  "binance": "FILUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 180079.14270000003,
+  "name": "Filecoin"
+ },
+ "DASHUSD": {
+  "binance": "DASHUSDT",
+  "contract_value": 0.1,
+  "tick": 0.01,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 99615.73999999998,
+  "name": "Dash"
+ },
+ "ETCUSD": {
+  "binance": "ETCUSDT",
+  "contract_value": 0.1,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 54711.8867,
+  "name": "Ethereum Classic"
+ },
+ "TRXUSD": {
+  "binance": "TRXUSDT",
+  "contract_value": 1.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 48129.684420000005,
+  "name": "TRON"
+ },
+ "ARUSD": {
+  "binance": "ARUSDT",
+  "contract_value": 1.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 45939.074000000015,
+  "name": "Arweave"
+ },
+ "HBARUSD": {
+  "binance": "HBARUSDT",
+  "contract_value": 1.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 14003.47489,
+  "name": "Hedera"
+ },
+ "GTCUSD": {
+  "binance": "GTCUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 8196.277999999998,
+  "name": "Gitcoin"
+ },
+ "1000SHIBUSD": {
+  "binance": "1000SHIBUSDT",
+  "contract_value": 1000.0,
+  "tick": 1e-06,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 7078.7970000000005,
+  "name": "1000SHIB"
+ },
+ "RUNEUSD": {
+  "binance": "RUNEUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 4873.1363,
+  "name": "THORChain"
+ },
+ "RLCUSD": {
+  "binance": "RLCUSDT",
+  "contract_value": 10.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 4851.32,
+  "name": "iExecRLC"
+ },
+ "MANAUSD": {
+  "binance": "MANAUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 4447.372700000001,
+  "name": "Decentraland"
+ },
+ "RSRUSD": {
+  "binance": "RSRUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-06,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 3443.5202,
+  "name": "Reserve Rights"
+ },
+ "IOSTUSD": {
+  "binance": "IOSTUSDT",
+  "contract_value": 10000.0,
+  "tick": 1e-07,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 3318.719,
+  "name": "IOST"
+ },
+ "XLMUSD": {
+  "binance": "XLMUSDT",
+  "contract_value": 1.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 3265.45209,
+  "name": "Stellar"
+ },
+ "ENJUSD": {
+  "binance": "ENJUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 2811.157,
+  "name": "Enjin Coin"
+ },
+ "DYDXUSD": {
+  "binance": "DYDXUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 2725.5937999999996,
+  "name": "dYdX"
+ },
+ "GALAUSD": {
+  "binance": "GALAUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-06,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 2504.2412,
+  "name": "GALA"
+ },
+ "KSMUSD": {
+  "binance": "KSMUSDT",
+  "contract_value": 0.1,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 2182.6283000000003,
+  "name": "Kusama"
+ },
+ "AXSUSD": {
+  "binance": "AXSUSDT",
+  "contract_value": 10.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 2083.0,
+  "name": "Axie Infinity"
+ },
+ "ZENUSD": {
+  "binance": "ZENUSDT",
+  "contract_value": 1.0,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 1988.6389999999997,
+  "name": "Horizen"
+ },
+ "PEOPLEUSD": {
+  "binance": "PEOPLEUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 1460.0380000000002,
+  "name": "ConstitutionDAO"
+ },
+ "TLMUSD": {
+  "binance": "TLMUSDT",
+  "contract_value": 10000.0,
+  "tick": 1e-06,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 1110.1699999999998,
+  "name": "Alien Worlds"
+ },
+ "MASKUSD": {
+  "binance": "MASKUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 1089.8917,
+  "name": "Mask Network"
+ },
+ "TRBUSD": {
+  "binance": "TRBUSDT",
+  "contract_value": 0.1,
+  "tick": 0.001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 994.4151999999999,
+  "name": "Tellor Tributes"
+ },
+ "SKLUSD": {
+  "binance": "SKLUSDT",
+  "contract_value": 100.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 4,
+  "turnover_usd_24h": 840.973,
+  "name": "SKALE"
+ },
+ "IOTAUSD": {
+  "binance": "IOTAUSDT",
+  "contract_value": 1.0,
+  "tick": 1e-05,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 335.40977,
+  "name": "IOTA"
+ },
+ "SUSHIUSD": {
+  "binance": "SUSHIUSDT",
+  "contract_value": 1.0,
+  "tick": 0.0001,
+  "taker": 0.0005,
+  "maker": 0.0002,
+  "funding_interval_h": 8,
+  "turnover_usd_24h": 293.6702,
+  "name": "Sushi"
+ }
+}

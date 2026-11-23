@@ -62,15 +62,22 @@ def _to_seconds(x: pd.Series) -> np.ndarray:
     return np.where(v > 10**15, v // 10**6, np.where(v > 10**12, v // 1000, v))  # us / ms / s
 
 
-def months(end: pd.Timestamp) -> list[str]:
-    return [p.strftime("%Y-%m") for p in pd.period_range(START, end.to_period("M") - 1, freq="M")]
+SPOT = "https://data.binance.vision/data/spot"
 
 
-def fetch_klines(sym: str, end: pd.Timestamp) -> pd.DataFrame:
-    urls = [f"{BASE}/monthly/klines/{sym}/1h/{sym}-1h-{m}.zip" for m in months(end)]
+def months(end: pd.Timestamp, start: str = START) -> list[str]:
+    return [p.strftime("%Y-%m") for p in pd.period_range(start, end.to_period("M") - 1, freq="M")]
+
+
+def fetch_klines(sym: str, end: pd.Timestamp, start: str = START, base: str = BASE,
+                 daily: bool = True) -> pd.DataFrame:
+    """1h klines from the archive. `end` is exclusive (monthly files up to the month before `end`,
+    then daily files for `end`'s month if daily=True)."""
+    urls = [f"{base}/monthly/klines/{sym}/1h/{sym}-1h-{m}.zip" for m in months(end, start)]
     day0 = end.to_period("M").start_time
-    urls += [f"{BASE}/daily/klines/{sym}/1h/{sym}-1h-{d:%Y-%m-%d}.zip"
-             for d in pd.date_range(day0, end - pd.Timedelta(days=1), freq="D")]
+    if daily:
+        urls += [f"{base}/daily/klines/{sym}/1h/{sym}-1h-{d:%Y-%m-%d}.zip"
+                 for d in pd.date_range(day0, end - pd.Timedelta(days=1), freq="D")]
     with ThreadPoolExecutor(8) as ex:
         blobs = list(ex.map(_get, urls))
     missing = [u for u, b in zip(urls, blobs) if b is None]
@@ -84,14 +91,14 @@ def fetch_klines(sym: str, end: pd.Timestamp) -> pd.DataFrame:
     return out
 
 
-def fetch_funding(sym: str, end: pd.Timestamp) -> pd.DataFrame:
-    urls = [f"{BASE}/monthly/fundingRate/{sym}/{sym}-fundingRate-{m}.zip" for m in months(end)]
+def fetch_funding(sym: str, end: pd.Timestamp, start: str = START) -> pd.DataFrame:
+    urls = [f"{BASE}/monthly/fundingRate/{sym}/{sym}-fundingRate-{m}.zip" for m in months(end, start)]
     with ThreadPoolExecutor(8) as ex:
         blobs = list(ex.map(_get, urls))
     df = pd.concat([_csv(b, None) for b in blobs if b is not None], ignore_index=True)
     t = _to_seconds(df["calc_time"])
-    out = pd.DataFrame({"time": (t // 60) * 60, "rate": df["last_funding_rate"].astype(float).to_numpy(),
-                        "interval_h": df.get("funding_interval_hours", pd.Series(8, index=df.index)).to_numpy()})
+    ih = df["funding_interval_hours"].to_numpy() if "funding_interval_hours" in df else np.full(len(df), np.nan)
+    out = pd.DataFrame({"time": (t // 60) * 60, "rate": df["last_funding_rate"].astype(float).to_numpy(), "interval_h": ih})
     out = out.drop_duplicates("time").sort_values("time").reset_index(drop=True)
     out.attrs["missing_files"] = [u for u, b in zip(urls, blobs) if b is None]
     return out

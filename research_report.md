@@ -1,3 +1,179 @@
+# Phase 4: does the frozen 4h trend filter work on data it has never seen?
+
+Run on 23 Nov 2026.
+
+**Pre-registration:** the rules, coin list, costs and pass criteria were committed in [`frozen_rules.md`](frozen_rules.md) (commit `796f128`, 2026-11-23 06:59:22 UTC) **before** any Phase 4 data was downloaded or any test was run. Nothing was retuned.
+
+## Verdict: PASS
+
+| Part | Pre-registered test | Result | Pass |
+|---|---|---|---|
+| A: unseen coins (33 after the frozen data-quality rule) | Net positive on ≥ 2/3 of coins | **31 of 33** (94%) | ✓ |
+| | Pooled profit factor ≥ 1.2 | **1.38** (4,879 trades, +$45,558 on 33 × $10,000) | ✓ |
+| | Pooled net R above the 95th percentile of the random-entry baseline (200 runs per coin) | **+888R** vs 95th percentile +353R (median +188R): **100th percentile** | ✓ |
+| B: BTC and ETH before perpetuals (Binance spot, Sep 2017 → Dec 2019) | Net positive on both | BTC **+13.7%** (PF 2.20), ETH **+7.7%** (PF 1.66) | ✓ |
+| **Overall** | Both parts pass | | **PASS** |
+
+**Is it worth paper trading? Yes.** This is the first result in the project that passed a test fixed before seeing the data. Keep expectations modest, though:
+- **The edge is real but small.** At 0.5% risk per trade the median coin made 1.8% a year (median Sharpe 0.50 vs 0.40 for buy-and-hold). An equal-weight portfolio of the 33 coins made +8.8% from Nov 2021 to Nov 2026, with a 2.2% maximum drawdown and Sharpe 0.89, while the same coins held outright lost 79%.
+- **It is mostly "be long in uptrends".** Longs made +$42,771 and shorts +$2,787. Shorts only paid in bear years (2022, 2025–26), where they mainly cushioned the long side's losses.
+- **A few big trends carry it.** The best 10 of 4,879 trades produced 23% of the profit. Without the best 25 trades the pooled profit factor is 1.21; without the best 1% it is 1.13. Missing a handful of big trends would erase most of the edge.
+- **Two caveats limit what "unseen" means:**
+  - The coins are correlated and cover the same 2020–2026 years in which the signal was found on BTC/ETH, so they are unseen coins, not unseen market history.
+  - Only Part B (2017–2019) is truly unseen time, and it is just 2 coins and 107 trades.
+- **Many qualifying coins barely trade on Delta.** 19 of the 33 had under $0.1M of 24h turnover (28 under $1M), where 0.01% slippage is optimistic. The 10 most liquid coins (8 after the data-quality rule) pass on their own: 8 of 8 positive, PF 1.39, 99.5th percentile.
+
+**My recommendation:** paper-trade the frozen rules on Delta's testnet for at least 6 months, on the liquid coins whose minimum account size fits your budget (BTC, ETH, SOL, XRP, BNB, LTC, LINK, BCH, AVAX, and so on). Keep 0.5% risk until the forward results agree with the backtest.
+
+## What was tested
+
+- **Part A:** every Delta India perpetual with a Binance USD-M archive from 2021 or earlier, excluding BTC and ETH. That gave 43 coins, minus LITUSD (ticker reuse), so **42 frozen**.
+- **Frozen data-quality rule:** drop a coin with a data gap over 7 days or any 1h move beyond ±50%. It removed 9: **TLM** (29-day hole in Binance's archive), plus **UNI, DOGE, GTC, XLM, PEOPLE, MASK, TRB, SUSHI** for single-hour moves of 52–104%.
+- **The rule was too broad (my mistake).** I meant it to catch relistings, but it also caught real extreme moves (DOGE's Jan 2021 squeeze, the 19 May 2021 crash rebound). It stays, because it was pre-registered.
+- **Putting those 8 back doesn't change the picture:** 38 of 41 positive, PF 1.40, 100th percentile. TLM stays out because its broken data creates impossible values.
+- **Data:**
+  - Binance USD-M 1h candles from the start of the archive (Jan 2020; I had assumed Sep 2019) to 21 Nov 2026.
+  - Delta fees and contract sizes per coin.
+  - Funding: Delta's actual rate from Nov 2024 (later for some coins); before that, Binance's rate plus the gap measured per coin (31 primary coins). The default BTC/ETH gap was used for RLC and IOST, which have too little Delta history.
+  - A 73-hour hole in Binance's archive (25–28 Feb 2022, 21 coins) was filled as flat bars, as pre-registered.
+- **Part B:** Binance spot BTCUSDT/ETHUSDT 1h, 17 Aug 2017 → 31 Dec 2019 (96 missing hours filled flat, longest gap 33h). Delta fees and contracts; funding assumed at 0.01% per 8h.
+- **Integrity check:** the Phase 4 code reproduces Phase 3's outputs byte for byte, and all 18 unit tests pass.
+
+## Per-coin and per-period results ($10,000 each, 0.5% risk, after fees, slippage and funding)
+
+| Part | Coin | Period | Trades | Net % | PF | Random pct | CAGR % | Max DD % | Sharpe (B&H) | Long net $ | Short net $ | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | SOLUSD | 2020-10-17 → 2026-11-21 | 154 | 22.4 | 1.60 | 90 | 3.4 | 4.0 | 1.01 (1.07) | 2,236 | 8 | ✓ positive · top-10 |
+| A | XRPUSD | 2020-02-08 → 2026-11-21 | 169 | 20.0 | 1.42 | 83 | 2.7 | 6.4 | 0.60 (0.66) | 1,989 | 7 | ✓ positive · top-10 |
+| A | ZECUSD | 2020-03-09 → 2026-11-21 | 164 | 23.1 | 1.56 | 87 | 3.2 | 5.6 | 0.75 (0.94) | 2,599 | -288 | ✓ positive · top-10 |
+| A | UNIUSD | 2020-10-21 → 2026-11-21 | 142 | 13.3 | 1.41 | 92 | 2.1 | 4.1 | 0.61 (0.61) | 975 | 351 | excluded (55% 1h move); positive · top-10 |
+| A | BNBUSD | 2020-03-14 → 2026-11-21 | 160 | 28.1 | 1.67 | 84 | 3.8 | 7.2 | 0.67 (1.11) | 2,855 | -45 | ✓ positive · top-10 |
+| A | DOGEUSD | 2020-08-12 → 2026-11-21 | 149 | 46.6 | 2.17 | 90 | 6.3 | 6.7 | 0.89 (0.75) | 3,936 | 723 | excluded (68% 1h move); positive · top-10 |
+| A | AAVEUSD | 2020-11-18 → 2026-11-21 | 125 | 10.8 | 1.42 | 96 | 1.7 | 4.2 | 0.64 (0.56) | 1,030 | 49 | ✓ positive · top-10 |
+| A | BCHUSD | 2020-02-03 → 2026-11-21 | 168 | 10.8 | 1.26 | 90 | 1.5 | 5.0 | 0.39 (0.37) | 912 | 171 | ✓ positive · top-10 |
+| A | LTCUSD | 2020-02-11 → 2026-11-21 | 158 | 0.7 | 1.02 | 68 | 0.1 | 8.6 | 0.05 (0.34) | 118 | -44 | ✓ positive · top-10 |
+| A | LINKUSD | 2020-02-19 → 2026-11-21 | 172 | 6.2 | 1.15 | 84 | 0.9 | 7.4 | 0.28 (0.61) | 832 | -216 | ✓ positive · top-10 |
+| A | AVAXUSD | 2020-10-26 → 2026-11-21 | 144 | 35.9 | 1.94 | 93 | 5.2 | 3.8 | 1.22 (0.62) | 2,993 | 598 | ✓ positive |
+| A | XMRUSD | 2020-03-07 → 2026-11-21 | 171 | -10.1 | 0.76 | 12 | -1.5 | 13.2 | -0.41 (0.77) | -178 | -832 | ✗ negative |
+| A | DOTUSD | 2020-09-24 → 2026-11-21 | 143 | 15.0 | 1.44 | 94 | 2.3 | 4.8 | 0.62 (0.19) | 1,207 | 294 | ✓ positive |
+| A | NEARUSD | 2020-11-17 → 2026-11-21 | 140 | 29.0 | 1.81 | 100 | 4.3 | 3.8 | 1.12 (0.76) | 2,684 | 218 | ✓ positive |
+| A | ADAUSD | 2020-03-04 → 2026-11-21 | 161 | 26.7 | 1.63 | 96 | 3.6 | 5.2 | 0.96 (0.65) | 2,076 | 592 | ✓ positive |
+| A | FILUSD | 2020-11-18 → 2026-11-21 | 145 | 11.7 | 1.34 | 80 | 1.9 | 5.5 | 0.50 (-0.05) | 926 | 249 | ✓ positive |
+| A | DASHUSD | 2020-03-08 → 2026-11-21 | 154 | 10.6 | 1.32 | 83 | 1.5 | 5.1 | 0.40 (0.40) | 1,181 | -119 | ✓ positive |
+| A | ETCUSD | 2020-02-18 → 2026-11-21 | 163 | 11.1 | 1.28 | 84 | 1.6 | 6.7 | 0.42 (0.41) | 852 | 254 | ✓ positive |
+| A | TRXUSD | 2020-02-17 → 2026-11-21 | 169 | 2.7 | 1.06 | 55 | 0.4 | 10.4 | 0.11 (0.85) | 1,344 | -1,076 | ✓ positive |
+| A | ARUSD | 2021-10-31 → 2026-11-21 | 126 | 6.1 | 1.19 | 66 | 1.2 | 8.2 | 0.32 (0.06) | 764 | -151 | ✓ positive |
+| A | HBARUSD | 2021-04-19 → 2026-11-21 | 139 | 10.5 | 1.28 | 78 | 1.8 | 5.3 | 0.43 (0.19) | 1,040 | 7 | ✓ positive |
+| A | GTCUSD | 2021-07-14 → 2026-11-21 | 103 | 7.8 | 1.40 | 90 | 1.4 | 5.7 | 0.35 (0.15) | 506 | 276 | excluded (70% 1h move); positive |
+| A | 1000SHIBUSD | 2021-06-13 → 2026-11-21 | 128 | 17.6 | 1.60 | 88 | 3.0 | 4.6 | 0.74 (0.40) | 1,275 | 489 | ✓ positive |
+| A | RUNEUSD | 2020-10-07 → 2026-11-21 | 150 | 26.7 | 1.69 | 96 | 3.9 | 4.2 | 1.08 (0.67) | 2,287 | 381 | ✓ positive |
+| A | RLCUSD | 2020-09-02 → 2026-11-21 | 163 | -5.0 | 0.88 | 47 | -0.8 | 16.4 | -0.18 (0.41) | 130 | -626 | ✗ negative |
+| A | MANAUSD | 2021-04-17 → 2026-11-21 | 131 | 18.1 | 1.56 | 91 | 3.0 | 4.1 | 0.62 (0.07) | 1,345 | 469 | ✓ positive |
+| A | RSRUSD | 2020-11-21 → 2026-11-21 | 143 | 7.0 | 1.22 | 85 | 1.1 | 6.1 | 0.29 (0.30) | 749 | -53 | ✓ positive |
+| A | IOSTUSD | 2020-03-25 → 2026-11-21 | 149 | 9.0 | 1.26 | 81 | 1.3 | 8.0 | 0.28 (0.31) | 891 | 11 | ✓ positive |
+| A | XLMUSD | 2020-02-22 → 2026-11-21 | 166 | 37.3 | 1.77 | 93 | 4.8 | 6.3 | 0.65 (0.56) | 3,652 | 77 | excluded (57% 1h move); positive |
+| A | ENJUSD | 2020-11-01 → 2026-11-21 | 138 | 21.1 | 1.62 | 91 | 3.2 | 4.5 | 0.79 (0.30) | 1,625 | 484 | ✓ positive |
+| A | DYDXUSD | 2021-10-13 → 2026-11-21 | 121 | 3.9 | 1.14 | 84 | 0.7 | 6.2 | 0.25 (-0.44) | 22 | 368 | ✓ positive |
+| A | GALAUSD | 2021-10-21 → 2026-11-21 | 117 | 23.9 | 1.91 | 94 | 4.3 | 5.7 | 0.95 (-0.04) | 1,515 | 874 | ✓ positive |
+| A | KSMUSD | 2020-11-16 → 2026-11-21 | 146 | 8.2 | 1.22 | 74 | 1.3 | 5.3 | 0.35 (0.15) | 948 | -129 | ✓ positive |
+| A | AXSUSD | 2020-12-23 → 2026-11-21 | 118 | 23.8 | 1.94 | 90 | 3.7 | 3.1 | 1.05 (0.61) | 1,376 | 1,008 | ✓ positive |
+| A | ZENUSD | 2020-12-27 → 2026-11-21 | 146 | 8.8 | 1.27 | 88 | 1.4 | 5.6 | 0.40 (0.44) | 945 | -69 | ✓ positive |
+| A | PEOPLEUSD | 2022-01-26 → 2026-11-21 | 119 | -1.9 | 0.94 | 48 | -0.4 | 5.6 | -0.10 (0.37) | 1 | -191 | excluded (52% 1h move); negative |
+| A | TLMUSD | 2021-08-18 → 2026-11-21 | 94 | 0.8 | 1.04 | 78 | 0.2 | 6.9 | 0.07 (-0.42) | 185 | -104 | excluded (29-day data gap); positive |
+| A | MASKUSD | 2021-09-29 → 2026-11-21 | 131 | 4.8 | 1.15 | 78 | 0.9 | 11.5 | 0.19 (-0.00) | 534 | -50 | excluded (58% 1h move); positive |
+| A | TRBUSD | 2020-10-06 → 2026-11-21 | 153 | 12.0 | 1.30 | 75 | 1.9 | 7.2 | 0.46 (0.65) | 1,628 | -431 | excluded (62% 1h move); positive |
+| A | SKLUSD | 2021-01-10 → 2026-11-21 | 143 | 13.0 | 1.37 | 94 | 2.1 | 4.8 | 0.57 (0.14) | 1,051 | 245 | ✓ positive |
+| A | IOTAUSD | 2020-03-16 → 2026-11-21 | 161 | 8.1 | 1.20 | 82 | 1.2 | 7.0 | 0.36 (0.29) | 1,151 | -338 | ✓ positive |
+| A | SUSHIUSD | 2020-10-07 → 2026-11-21 | 147 | 17.3 | 1.47 | 96 | 2.6 | 3.8 | 0.69 (0.43) | 1,178 | 551 | excluded (104% 1h move); positive |
+| B | BTCUSD | 2017-09-19 → 2019-12-31 | 52 | 13.7 | 2.20 | 94 | 5.8 | 3.9 | 1.41 (0.72) | 920 | 448 | ✓ positive |
+| B | ETHUSD | 2017-09-19 → 2019-12-31 | 55 | 7.7 | 1.66 | 84 | 3.3 | 3.3 | 0.97 (0.13) | 380 | 391 | ✓ positive |
+
+"Random pct" is each coin's own percentile against its 200 random-entry runs. Coin by coin the median is the 85th percentile (middle half 81st–91st), and only 4 of 33 reach the 95th; the edge shows up clearly only when coins are pooled. Equity curves: `charts/phase4/<part>_<coin>.png`; overview: `charts/phase4_overview.png`.
+
+## Pooled results
+
+| Set | Coins | Positive | Trades | Net $ | Pooled PF | Net R | Random 95th pct (R) | Percentile |
+|---|---|---|---|---|---|---|---|---|
+| **A primary (decides the verdict)** | 33 | 31 | 4,879 | +45,558 | 1.38 | +888 | +353 | 100 |
+| A top-10 most liquid on Delta (diagnostic; 8 left after the data-quality rule) | 8 | 8 | 1,270 | +12,213 | 1.39 | +244 | +173 | 99.5 |
+| A including the 8 coins excluded only for extreme moves (diagnostic) | 41 | 38 | 5,989 | +59,273 | 1.40 | +1,148 | +444 | 100 |
+| B pre-2020 BTC + ETH | 2 | 2 | 107 | +2,140 | – | – | – | – |
+
+## Diagnostics (reported only; no rule was changed)
+
+### Where the profit comes from
+
+| Year (entry) | Trades | Net $ | PF | Longs net $ | Shorts net $ |
+|---|---|---|---|---|---|
+| 2020 | 337 | +2,391 | 1.28 | +4,421 | −2,030 |
+| 2021 | 676 | +12,574 | 1.78 | +14,559 | −1,985 |
+| 2022 | 750 | +557 | 1.03 | −4,434 | +4,991 |
+| 2023 | 814 | +10,770 | 1.53 | +12,488 | −1,718 |
+| 2024 | 811 | +8,206 | 1.37 | +11,228 | −3,022 |
+| 2025 | 783 | +1,728 | 1.09 | +408 | +1,320 |
+| 2026 | 708 | +9,332 | 1.54 | +4,100 | +5,232 |
+
+- **Long side:** profitable on 32 of 33 coins.
+- **Short side:** profitable on 20 of 33, and only in the bear years.
+- **Part B:** both sides made money. BTC longs +$920, shorts +$448; ETH longs +$380, shorts +$391.
+
+**Costs (Part A primary):** fees $2,191 and funding −$5,164 against $52,913 gross. **Funding cost 2.4× the fees** on these 2–3-week holds.
+
+### Risk scaling (Part A primary; medians across the 33 coins)
+
+| Risk per trade | Median CAGR | Median max DD | Worst coin max DD | Median Sharpe | 3x leverage cap binds | Trades lost to Delta's minimum contract ($10,000 account) |
+|---|---|---|---|---|---|---|
+| 0.5% | 1.8% | 5.5% | 16.4% | 0.50 | 0% of trades | 76 of 4,955 (4 coins) |
+| 1% | 3.4% | 10.7% | 31.1% | 0.43 | 0% | 25 (3 coins) |
+| 2% | 5.9% | 20.8% | 53.2% | 0.43 | 0% | 0 |
+
+- **Part B, BTC:** CAGR 5.8% / 11.6% / 23.4% with max DD 3.9% / 7.9% / 15.1% at 0.5% / 1% / 2%.
+- **Part B, ETH:** CAGR 3.3% / 6.5% / 13.0% with max DD 3.3% / 6.4% / 12.5%.
+- **Return and drawdown scale roughly in step with risk; Sharpe does not improve.** Doubling risk doubles both, so a higher setting makes the swings bigger without making the strategy better.
+
+### Minimum Delta account per coin with no skipped trades
+
+The per-trade requirement is contract size × max(stop distance ÷ risk, price ÷ 3).
+
+- **Most coins need very little today:** 29 of the 33 primary coins need under $300 at 0.5% risk at current prices.
+- **The exceptions, at 0.5% / 1% / 2% risk:** ZEC $4,529 / $2,264 / $1,132; AAVE $3,719 / $1,859 / $930; SOL $1,895 / $947 / $474; BNB $1,046 / $523 / $261.
+- **BTC and ETH perpetuals today:** BTC $1,073 / $536 / $268; ETH $426 / $213 / $107.
+- **Past peak prices needed far more** (e.g. AXS $53k and AAVE $35k at 0.5%), because Delta's contract size is fixed in coins. Full table: `logs/phase4_min_account.csv`.
+
+## Phase 4 assumptions and limitations
+
+| # | Item |
+|---|---|
+| 1 | **Survivorship:** only coins still listed on Delta and Binance in 2026 could qualify. Coins that collapsed and were delisted (e.g. LUNA, FTT) are missing; their effect on a long/short trend filter is unknown |
+| 2 | **Correlation:** the coins move together. The random baseline draws each coin independently, so the pooled 100th percentile overstates how many independent confirmations there are |
+| 3 | **Same years:** Part A covers 2020–2026, the years in which the signal was found on BTC/ETH. Only Part B is unseen time |
+| 4 | Binance USDT-M prices stand in for Delta's USD contracts; Delta's real liquidity in most of these coins is thin, so 0.01% slippage is optimistic for them |
+| 5 | Delta funding for coins with a 4h interval is read as the rate per settlement, as for BTC/ETH (not verified separately) |
+| 6 | Part B funding is assumed (0.01% per 8h); spot prices have no funding or basis |
+| 7 | Data holes (73h in Feb 2022; 96 hours in the 2017–19 spot data) are flat bars, so the strategy can't trade during them |
+| 8 | The data-quality rule was broader than intended (see above); the diagnostic shows it did not flatter the result |
+
+## Phase 4 files
+
+- `frozen_rules.md`: pre-registration, committed first
+- `phase4_runner.py` → `phase4_results.csv` (one row per coin and period), `phase4_summary.csv` (pooled tests and verdict)
+- `logs/phase4_risk_scaling.csv`, `logs/phase4_min_account.csv`, `logs/phase4_portfolio.csv`
+- `logs/phase4_trades/` (every trade), `logs/phase4_delta_specs.json` (frozen Delta specs snapshot)
+- `charts/phase4/` (one equity chart per coin and period), `charts/phase4_overview.png`
+- `core/phase4_data.py` (downloads), `core/market.py` (`load_phase4_market`, `load_spot_market`)
+
+Rebuild the data, then rerun:
+
+```bash
+python3 -m core.phase4_data
+```
+
+```bash
+python3 phase4_runner.py
+```
+
+---
+
 # Phase 3: is there a real edge at longer holding periods?
 
 Run on 23 Nov 2026. Signals were screened for an edge at zero cost first, and only the survivor was built into a strategy.

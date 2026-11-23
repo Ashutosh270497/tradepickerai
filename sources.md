@@ -35,6 +35,9 @@ No source in this research had a verifiable live track record.
 |---|---|---|
 | https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1h/ (and ETHUSDT; daily files for the current month) | Binance official public archive (read) | 1h BTCUSDT/ETHUSDT perpetual candles 2020-01-01 → 2026-11-21, resampled to 4h and 1D |
 | https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/ (and ETHUSDT) | Binance official public archive (read) | 8-hourly funding 2020-01 → 2026-10 |
+| https://data.binance.vision/data/futures/um/monthly/klines/{COIN}USDT/1h/ and .../fundingRate/{COIN}USDT/ (42 Phase 4 coins) | Binance official public archive (read) | Phase 4 Part A prices and funding, Jan 2020 → Nov 2026 |
+| https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1h/ (and ETHUSDT) | Binance official public archive (read) | Phase 4 Part B: spot prices Aug 2017 → Dec 2019 |
+| https://api.india.delta.exchange/v2/products, /v2/tickers/{symbol}, /v2/history/candles?symbol=FUNDING:{symbol} | [official] (read) | Phase 4 coin selection, contract sizes, fees, funding intervals, 24h turnover snapshot, Delta funding history |
 | https://api.bybit.com/v5/market/kline | Bybit official API (blocked, HTTP 403 from this server) | Not used |
 | https://fapi.binance.com/fapi/v1/klines | Binance official API (blocked, HTTP 451 from this server) | Not used |
 

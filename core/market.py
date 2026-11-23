@@ -156,3 +156,110 @@ def load_binance_market(symbol: str) -> Market:
     m._cache["funding_gap"] = gap
     m._cache["first_delta_funding"] = first_delta
     return m
+
+
+# ---------------------------------------------------------------- Phase 4 loaders (data only; no rule changes)
+DEFAULT_GAP_8H = 0.000034   # BTC/ETH average Delta-minus-Binance funding gap per 8h, measured in Phase 3
+
+
+def fill_hourly(raw: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Reindex 1h candles to a complete hourly grid; missing hours become flat bars (no trading)."""
+    t0, t1 = int(raw["time"].iloc[0]), int(raw["time"].iloc[-1])
+    full = np.arange(t0, t1 + 3600, 3600, dtype=np.int64)
+    df = raw.set_index("time").reindex(full)
+    filled = int(df["close"].isna().sum())
+    df["volume"] = df["volume"].fillna(0.0)
+    df["close"] = df["close"].ffill()
+    for c in ("open", "high", "low"):
+        df[c] = df[c].fillna(df["close"])
+    df.index.name = "time"
+    return df.reset_index(), filled
+
+
+def data_quality(raw: pd.DataFrame) -> dict:
+    """Frozen Phase 4 exclusion rule: gap > 7 days or any 1h close-to-close move beyond +/-50%."""
+    t = raw["time"].to_numpy()
+    c = raw["close"].to_numpy()
+    max_gap_h = float(np.diff(t).max() / 3600) if len(t) > 1 else 0.0
+    max_move = float(np.abs(c[1:] / c[:-1] - 1).max()) if len(c) > 1 else 0.0
+    return {"max_gap_hours": max_gap_h, "max_1h_move_pct": max_move * 100,
+            "excluded": max_gap_h > 7 * 24 or max_move > 0.5}
+
+
+def _binance_events(symbol: str) -> pd.DataFrame:
+    from core import binance_data as bd
+    f = pd.read_parquet(bd.funding_path(symbol)).sort_values("time").reset_index(drop=True)
+    f["time"] = f["time"] // 3600 * 3600
+    ih = f["interval_h"].to_numpy(dtype=float)
+    gaps = np.diff(f["time"].to_numpy()) / 3600
+    inferred = np.r_[gaps[:1], gaps] if len(gaps) else np.array([8.0])
+    ih = np.where(np.isfinite(ih) & (ih > 0), ih, inferred)
+    f["interval_h"] = np.clip(np.round(ih), 1, 8)
+    return f[["time", "rate", "interval_h"]]
+
+
+def _delta_events(symbol: str, interval_h: int) -> pd.DataFrame:
+    """Delta settlements every `interval_h` hours; realised rate = published value in the hour before."""
+    f = data.load_funding(symbol).sort_values("time")
+    t = f["time"].to_numpy()
+    st = f[((t + 3600) % (interval_h * 3600) == 0)]
+    return pd.DataFrame({"time": st["time"].to_numpy() + 3600, "rate": st["close"].to_numpy() / 100.0,
+                         "interval_h": float(interval_h)})
+
+
+def load_phase4_market(symbol: str, lot: float, tick: float, delta_interval_h: int) -> Market:
+    """Binance USD-M 1h history for a Part A coin, Delta contract specs, funding per frozen_rules.md s.3."""
+    from core import binance_data as bd
+    raw = pd.read_parquet(bd.path(symbol))
+    dq = data_quality(raw)
+    df, filled = fill_hourly(raw)
+    t = df["time"].to_numpy(np.int64)
+    m = Market(symbol, t, *(df[k].to_numpy(float) for k in ("open", "high", "low", "close", "volume")),
+               tick=tick, lot=lot, step=3600)
+    be = _binance_events(symbol)
+    be["per8"] = be["rate"] * 8 / be["interval_h"]
+    try:
+        de = _delta_events(symbol, delta_interval_h)
+    except FileNotFoundError:
+        de = pd.DataFrame(columns=["time", "rate", "interval_h"])
+    gap_src, gap = "default BTC/ETH gap", DEFAULT_GAP_8H
+    if len(de):
+        de["per8"] = de["rate"] * 8 / de["interval_h"]
+        a, b = max(de["time"].min(), be["time"].min()), min(de["time"].max(), be["time"].max())
+        if (b - a) / 86400 >= 90:
+            gap = float(de[(de.time >= a) & (de.time <= b)]["per8"].mean() - be[(be.time >= a) & (be.time <= b)]["per8"].mean())
+            gap_src = f"measured over {(b - a) / 86400:.0f} days"
+        first_delta = int(de["time"].min())
+    else:
+        first_delta = int(t[-1]) + 3600
+    pre = be[be["time"] < first_delta].copy()
+    pre["rate"] = pre["rate"] + gap * pre["interval_h"] / 8
+    ev = pd.concat([pre[["time", "rate"]], de[["time", "rate"]] if len(de) else None]).sort_values("time")
+    ev = ev.drop_duplicates("time")
+    last_t = int(ev["time"].max())
+    if last_t + 8 * 3600 <= t[-1]:   # carry the last known rate forward if a source runs out
+        extra = np.arange(last_t + 8 * 3600, t[-1] + 1, 8 * 3600)
+        ev = pd.concat([ev, pd.DataFrame({"time": extra, "rate": ev["rate"].iloc[-1]})])
+    ev = ev[(ev["time"] > t[0]) & (ev["time"] <= t[-1])]
+    m.settle_idx = m.idx(ev["time"].to_numpy(np.int64)).astype(np.int64)
+    m.settle_rate = ev["rate"].to_numpy(float)
+    m._cache.update(funding_gap_8h=gap, funding_gap_source=gap_src, filled_hours=filled, dq=dq,
+                    first_delta_funding=first_delta)
+    return m
+
+
+def load_spot_market(symbol: str) -> Market:
+    """Part B: Binance spot 1h BTC/ETH 2017-08 -> 2019-12, Delta specs, assumed funding 0.01% per 8h."""
+    from core.phase4_data import spot_path
+    raw = pd.read_parquet(spot_path(symbol))
+    raw = raw[raw["time"] < pd.Timestamp("2020-01-01", tz="UTC").value // 10**9]
+    dq = data_quality(raw)
+    df, filled = fill_hourly(raw)
+    t = df["time"].to_numpy(np.int64)
+    m = Market(symbol, t, *(df[k].to_numpy(float) for k in ("open", "high", "low", "close", "volume")),
+               step=3600, **SPECS[symbol])
+    hours = (t % 86400) // 3600
+    idx = np.flatnonzero((t % 3600 == 0) & np.isin(hours, SETTLE_HOURS))
+    m.settle_idx, m.settle_rate = idx.astype(np.int64), np.full(len(idx), 0.0001)
+    m._cache.update(filled_hours=filled, dq=dq, funding_gap_source="assumed 0.01%/8h")
+    return m
