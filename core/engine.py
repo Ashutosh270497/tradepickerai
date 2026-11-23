@@ -23,7 +23,7 @@ Execution rules
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -44,9 +44,12 @@ class Scenario:
     close_discount: float = 0.0      # 0 = standard fees, 0.5 = 50% off the close, 1.0 = free close
     time_cap: int | None = None      # forced time stop in minutes (29 in the offer scenarios)
     slip: float = 0.0001             # per side on market entries, market exits and stop fills
+    maker_fills: bool = False        # 'maker scenario': market entries and time/signal exits are
+                                     # assumed to fill as limit orders (maker fee, no slippage);
+                                     # stops stay stop-market (taker + slippage). Optimistic.
 
     def with_slip(self, slip: float) -> "Scenario":
-        return Scenario(self.name, self.close_discount, self.time_cap, slip)
+        return replace(self, slip=slip)
 
 
 SCENARIOS = [
@@ -66,7 +69,7 @@ def candidates(**cols) -> dict:
     """Build a candidate table. Required: sig, fill, dir. Optional (scalar or array):
     etype (MARKET/LIMIT), px (limit price), stop (absolute) or sdist (distance from fill),
     tgt (absolute) or rr (R multiple) or dyn=1 (use the strategy's dynamic target array),
-    maxb (time stop in minutes, 0 = none), exit_at (1m index to exit at its open, -1 = none)."""
+    maxb (time stop in BARS of the market, i.e. minutes on 1m data; 0 = none), exit_at (1m index to exit at its open, -1 = none)."""
     n = len(np.atleast_1d(cols["sig"]))
     out = {}
     for k, default in FIELDS.items():
@@ -204,7 +207,7 @@ def run(m: Market, cand: dict, start: int, end: int, sc: Scenario, dyn_long=None
         if et == LIMIT:
             entry, entry_pos = float(cand["px"][i]), f + 0.5
         else:
-            entry, entry_pos = m.o[f] * (1 + d * sc.slip), float(f)
+            entry, entry_pos = (m.o[f] if sc.maker_fills else m.o[f] * (1 + d * sc.slip)), float(f)
         stop = cand["stop"][i] if not np.isnan(cand["stop"][i]) else entry - d * cand["sdist"][i]
         dist = (entry - stop) * d
         if not dist > 0:
@@ -222,7 +225,8 @@ def run(m: Market, cand: dict, start: int, end: int, sc: Scenario, dyn_long=None
             dyn = dyn_long if d > 0 else dyn_short
         maxb = int(cand["maxb"][i])
         if sc.time_cap:
-            maxb = min(maxb, sc.time_cap) if maxb else sc.time_cap
+            cap = max(1, int(sc.time_cap * 60 // m.step))
+            maxb = min(maxb, cap) if maxb else cap
         j_end = m.n
         if maxb:
             j_end = min(j_end, f + maxb)
@@ -243,10 +247,12 @@ def run(m: Market, cand: dict, start: int, end: int, sc: Scenario, dyn_long=None
             i += 1
             continue
         exit_pos, raw, kind, maker_exit = path_exit(m, f, d, et, stop, tgt, dyn, j_end)
+        if sc.maker_fills and kind in ("time", "end", "dyn_open"):
+            maker_exit = True
         exit_px = raw if maker_exit else raw * (1 - d * sc.slip)
-        hold = exit_pos - entry_pos
+        hold = (exit_pos - entry_pos) * m.step / 60.0   # minutes
         gross = d * (exit_px - entry) * qty
-        fees, fee_free = trade_costs(entry, exit_px, qty, et, maker_exit, hold, sc)
+        fees, fee_free = trade_costs(entry, exit_px, qty, LIMIT if sc.maker_fills else et, maker_exit, hold, sc)
         fund = funding_paid(m, entry_pos, exit_pos, d, qty)
         net = gross - fees + fund
         risk_usd = qty * dist
@@ -300,15 +306,19 @@ def random_baseline(m: Market, trades: pd.DataFrame, start: int, end: int, sc: S
         total = 0.0
         for e, p in zip(entries, perm):
             d, et = int(dirs[p]), int(etypes[p])
-            entry = m.o[e] if et == LIMIT else m.o[e] * (1 + d * sc.slip)
+            mk = sc.maker_fills or et == LIMIT
+            entry = m.o[e] if mk else m.o[e] * (1 + d * sc.slip)
             stop = entry * (1 - d * sf[p])
             tgt = entry * (1 + d * tf[p]) if not np.isnan(tf[p]) else np.nan
             j_end = min(m.n, e + int(mh[p]))
             if sc.time_cap:
-                j_end = min(j_end, e + sc.time_cap)
+                j_end = min(j_end, e + max(1, int(sc.time_cap * 60 // m.step)))
             pos, raw, kind, maker = path_exit(m, int(e), d, MARKET, stop, tgt, None, max(j_end, e + 1))
+            if sc.maker_fills and kind in ("time", "end"):
+                maker = True
             exit_px = raw if maker else raw * (1 - d * sc.slip)
             fund = funding_paid(m, float(e), pos, d, 1.0) / entry
-            total += net_r_fraction(entry, exit_px, d, et, maker, pos - e, sf[p], sc, fund)
+            total += net_r_fraction(entry, exit_px, d, LIMIT if mk else MARKET, maker, (pos - e) * m.step / 60.0,
+                                    sf[p], sc, fund)
         out[s] = total
     return out

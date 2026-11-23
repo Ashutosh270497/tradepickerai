@@ -1,5 +1,5 @@
-# earlier exploratory CSV caches and results (regenerable); Phase 2 parquet data is committed
-data/*.csv
+# market data is rebuilt by the download scripts (python3 -m core.data download, python3 -m core.binance_data)
+data/
 results/
 logs/download_*.log
 __pycache__/

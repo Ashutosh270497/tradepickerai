@@ -29,6 +29,15 @@ No source in this research had a verifiable live track record.
 | https://www.delta.exchange/blog/futures-scalper-carnival | [official] (read) | Earlier 2023 promotion (50% cashback, expired), showing promotions change |
 | https://www.delta.exchange/blog/how-to-minimize-your-crypto-trading-fees-and-keep-more-profit | [official] (snippet) | Fee levels (consistent with the API) |
 
+## Long history for Phase 3 (signal research only)
+
+| URL | Tag | Used for |
+|---|---|---|
+| https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1h/ (and ETHUSDT; daily files for the current month) | Binance official public archive (read) | 1h BTCUSDT/ETHUSDT perpetual candles 2020-01-01 → 2026-11-21, resampled to 4h and 1D |
+| https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/ (and ETHUSDT) | Binance official public archive (read) | 8-hourly funding 2020-01 → 2026-10 |
+| https://api.bybit.com/v5/market/kline | Bybit official API (blocked, HTTP 403 from this server) | Not used |
+| https://fapi.binance.com/fapi/v1/klines | Binance official API (blocked, HTTP 451 from this server) | Not used |
+
 ## Academic and quantitative research (Phase 1)
 
 | URL | Tag | Finding relevant here |

@@ -33,6 +33,7 @@ class Market:
     v: np.ndarray
     tick: float
     lot: float
+    step: int = 60  # bar size in seconds (60 = Delta 1m; 3600 = Binance 1h history)
     settle_idx: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
     settle_rate: np.ndarray = field(default_factory=lambda: np.zeros(0))  # fraction per settlement
     _cache: dict = field(default_factory=dict, repr=False)
@@ -42,8 +43,8 @@ class Market:
         return len(self.t)
 
     def idx(self, ts) -> np.ndarray:
-        """1m bar index whose open time is ts (ts must be on the minute grid)."""
-        return (np.asarray(ts, dtype=np.int64) - int(self.t[0])) // 60
+        """Bar index whose open time is ts (ts must be on the bar grid)."""
+        return (np.asarray(ts, dtype=np.int64) - int(self.t[0])) // self.step
 
     def bars(self, minutes: int) -> pd.DataFrame:
         """Complete higher-timeframe bars aligned to UTC. `act` = 1m index where the bar's
@@ -55,7 +56,7 @@ class Market:
         df = pd.DataFrame({"key": key, "o": self.o, "h": self.h, "l": self.l, "c": self.c, "v": self.v})
         g = df.groupby("key", sort=True).agg(o=("o", "first"), h=("h", "max"), l=("l", "min"),
                                              c=("c", "last"), v=("v", "sum"), n=("o", "size"))
-        g = g[g["n"] == minutes].drop(columns="n").reset_index().rename(columns={"key": "time"})
+        g = g[g["n"] == minutes * 60 // self.step].drop(columns="n").reset_index().rename(columns={"key": "time"})
         g["act"] = self.idx(g["time"].to_numpy() + step)
         g = g[g["act"] < self.n].reset_index(drop=True)
         self._cache[minutes] = g
@@ -81,7 +82,9 @@ class Market:
             if weekdays_only and d.weekday() >= 5:
                 continue
             ts = pd.Timestamp(d.year, d.month, d.day, hour, minute, tz=NY).tz_convert("UTC").value // 10**9
-            j = (ts - int(self.t[0])) // 60
+            if (ts - int(self.t[0])) % self.step:
+                continue
+            j = (ts - int(self.t[0])) // self.step
             if 0 <= j < self.n:
                 out.append(j)
         return np.asarray(out, dtype=np.int64)
@@ -115,3 +118,41 @@ def funding_schedule(t: np.ndarray, funding: pd.DataFrame) -> tuple[np.ndarray, 
     f = funding.sort_values("time")
     rate_at = pd.merge_asof(pd.DataFrame({"time": t[idx] - 3600}), f[["time", "close"]], on="time")["close"]
     return idx.astype(np.int64), (rate_at.fillna(0.01).to_numpy() / 100.0)
+
+
+def delta_settlements(symbol: str) -> pd.DataFrame:
+    """Delta's realised funding per settlement (fraction), from the cached FUNDING:<symbol> history."""
+    f = data.load_funding(symbol).sort_values("time")
+    t = f["time"].to_numpy()
+    hrs = (t % 86400) // 3600
+    st = f[np.isin(hrs, [h - 1 if h else 23 for h in SETTLE_HOURS]) & (t % 3600 == 0)]
+    return pd.DataFrame({"time": st["time"].to_numpy() + 3600, "rate": st["close"].to_numpy() / 100.0})
+
+
+def load_binance_market(symbol: str) -> Market:
+    """Binance USD-M perpetual 1h history (2020 onward) as a Market with step=3600.
+
+    Prices: Binance BTCUSDT/ETHUSDT (proxy for Delta; 1h return correlation 0.999 over the overlap).
+    Contract specs (tick, lot) and costs: Delta's.
+    Funding at each 00/08/16 UTC settlement: Delta's actual rate where Delta history exists; before
+    that, Binance's rate PLUS the average Delta-minus-Binance gap measured over the overlap
+    (Delta's funding averaged ~0.003%/8h higher). ASSUMPTION, flagged in the report."""
+    from core import binance_data as bd
+    raw = pd.read_parquet(bd.path(symbol))
+    t = raw["time"].to_numpy(np.int64)
+    m = Market(symbol, t, *(raw[k].to_numpy(float) for k in ("open", "high", "low", "close", "volume")),
+               step=3600, **SPECS[symbol])
+    b = pd.read_parquet(bd.funding_path(symbol))[["time", "rate"]]
+    d = delta_settlements(symbol)
+    ov = d.merge(b, on="time", suffixes=("_d", "_b"))
+    gap = float((ov["rate_d"] - ov["rate_b"]).mean())
+    first_delta = int(d["time"].min())
+    combo = pd.concat([b[b["time"] < first_delta].assign(rate=lambda x: x["rate"] + gap), d[d["time"] >= first_delta]])
+    combo = combo.sort_values("time").drop_duplicates("time")
+    hours = (t % 86400) // 3600
+    idx = np.flatnonzero((t % 3600 == 0) & np.isin(hours, SETTLE_HOURS))
+    rate = pd.merge_asof(pd.DataFrame({"time": t[idx]}), combo, on="time")["rate"].fillna(0.0001).to_numpy()
+    m.settle_idx, m.settle_rate = idx.astype(np.int64), rate
+    m._cache["funding_gap"] = gap
+    m._cache["first_delta_funding"] = first_delta
+    return m

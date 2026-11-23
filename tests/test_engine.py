@@ -177,3 +177,31 @@ def test_trading_halts_at_ruin():
     tr = run(m, c, 0, m.n, STD)
     assert tr.attrs["ruined_at"] is not None
     assert (tr["equity_before"] > 100).all()
+
+
+def mk_hourly(o, h=None, l=None, settle_idx=(), settle_rate=()):
+    m = mk(o, h, l, settle_idx=settle_idx, settle_rate=settle_rate)
+    m.t = T0 + 3600 * np.arange(len(m.o), dtype=np.int64)
+    m.step = 3600
+    return m
+
+
+def test_hourly_bars_hold_time_in_minutes_and_idx():
+    m = mk_hourly([100.0] * 10)
+    r = run(m, candidates(sig=0, fill=1, dir=1, sdist=1.0, maxb=3), 0, m.n, NOSLIP).iloc[0]
+    assert r.hold_min == 180 and r.exit_kind == "time"
+    assert m.idx(T0 + 7200) == 2
+    b = m.bars(240)
+    assert list(b["act"]) == [4, 8]
+
+
+def test_maker_scenario_entry_and_time_exit_are_maker_without_slippage():
+    m = mk([100, 100, 100, 101, 101])
+    sc = Scenario("maker", slip=0.0001, maker_fills=True)
+    r = one(m, sc, sdist=1.0, maxb=2).iloc[0]
+    assert r.entry == 100.0 and r.exit == 101.0
+    assert r.fees == pytest.approx(MAKER * (1 + GST) * r.qty * (100.0 + 101.0))
+    s = mk([100, 100, 100, 100], l=[99.75, 99.75, 98.9, 99.75])
+    r = one(s, sc, sdist=0.5, maxb=3).iloc[0]          # stop stays stop-market: taker + slippage
+    assert r.exit_kind == "stop" and r.exit == pytest.approx(99.5 * (1 - 0.0001))
+    assert r.fees == pytest.approx(MAKER * (1 + GST) * r.qty * 100.0 + TAKER * (1 + GST) * r.qty * r.exit)

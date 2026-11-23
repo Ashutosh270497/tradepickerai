@@ -3,20 +3,25 @@ platform which helps you to pick the best suited trade for you to become profita
 
 ## Research status
 
-Phase 2 backtest of 7 scalping strategies on Delta Exchange India (BTCUSD and ETHUSD perpetuals, 2 years of 1-minute data). **Result: none passed, in any fee scenario.** Start with [research_report.md](research_report.md).
+Start with [research_report.md](research_report.md).
+
+- **Phase 3 (longer holding periods):** a zero-cost screen of 242 signal configurations found one survivor, a 4h price-vs-SMA trend filter held 10–30 days. It **passes** the walk-forward PASS bar only marginally and is rated **LOW-CONFIDENCE**: it fails on the half of the data not used to pick it.
+- **Phase 2 (1–5 minute scalping):** 7 strategies on Delta Exchange India, 2 years of 1-minute data. **None passed**, in any fee scenario.
 
 | Path | What it is |
 |---|---|
 | `research_report.md` | Platform facts, breakeven math, results, what didn't work and why |
 | `phase1_findings.md` | Phase 0/1 platform facts, research summary and the 7-strategy shortlist |
 | `sources.md` | Every URL used, tagged by evidence quality |
-| `results.csv` | Selected variant of each strategy, by fee scenario, period and symbol |
+| `edge_screen.py`, `edge_screen.csv` | Phase 3 zero-cost edge screen and every test it ran |
+| `phase3_runner.py`, `phase3_verdicts.csv`, `phase3_results.csv` | Phase 3 walk-forward backtest of the screen survivor |
+| `results.csv` | Phase 2: selected variant of each strategy, by fee scenario, period and symbol |
 | `charts/` | In-sample and out-of-sample equity curves per strategy |
 | `logs/` | Every variant tried, random baselines, quarterly breakdowns, trade lists |
 | `strategies/` | One Python file per strategy |
 | `core/` | Data download, market container, backtest engine, indicators, metrics |
 | `tests/` | Unit tests for fees, slippage, funding, limit and stop fills, no-lookahead |
-| `data/` | Cached Delta candles and funding history (parquet) |
+| `data/` | Not committed; rebuild with `python3 -m core.data download` and `python3 -m core.binance_data` |
 | `backtest/` | Earlier exploratory backtests (EMA crosses, multi-timeframe comparison) |
 
 ```bash
@@ -29,4 +34,12 @@ python3 -m pytest -q tests
 
 ```bash
 python3 backtest_runner.py
+```
+
+```bash
+python3 edge_screen.py
+```
+
+```bash
+python3 phase3_runner.py
 ```

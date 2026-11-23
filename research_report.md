@@ -1,4 +1,194 @@
-# Phase 2 report: do crypto scalping strategies make money on Delta Exchange India?
+# Phase 3: is there a real edge at longer holding periods?
+
+Run on 23 Nov 2026. Signals were screened for an edge at zero cost first, and only the survivor was built into a strategy.
+
+## Verdict
+
+| Strategy | Your PASS rule (stitched walk-forward out-of-sample, 2022-01 → 2026-11) | Same rule on the clean half only (2022-01 → 2024-08) | My assessment |
+|---|---|---|---|
+| **4h price vs SMA trend filter, 10–30-day hold** (the only screen survivor) | **PASS**, but only just | Would **not** pass: 87.5th percentile vs random (needs 95th); expectancy confidence interval includes zero | **LOW-CONFIDENCE.** Paper-trade it; don't fund it yet |
+| The other 241 signal configurations | Did not survive the screen | – | FAIL |
+
+**In plain language**
+- **Short horizons have nothing.** At 15 minutes, no signal had a gross edge big enough to cover costs, including your 9/21 EMA cross (about 0.00%–0.10% gross per trade).
+- **One trend signal holds up, weakly.** Following the 4-hour trend for 2–4 weeks is the only thing that showed an edge clearly bigger than costs and that survived the multiple-testing correction.
+- **It passes your bar, but only just.** As a full strategy with Delta fees, slippage and actual funding, it clears every PASS test, with little room on most of them.
+- **Three things make me rate it LOW-CONFIDENCE:**
+  - **Selection overlap.** The signal was chosen partly on 2024–2026 data, and that period supplies most of the strength. In 2022–2024, a period that played no role in choosing it, it is no better than random at the 95% level.
+  - **The bar is close to the line.** The expectancy confidence interval lower bound is 0.02R, and the random percentile is 97 against a bar of 95. Small changes (account size, slippage) moved the profit factor between 1.42 and 1.57 just by shifting the trade sequence.
+  - **The benchmark was easy.** Buy-and-hold BTC/ETH (50/50) lost 12% over this window (ETH −54%), so "better than buy-and-hold" was a low bar.
+- **The returns are small at your risk setting.** At 0.5% risk per trade with an 8% stop, the strategy holds positions worth only about 6% of equity. Result: +12.4% in 4.9 years (2.4% a year) with a 2.8% maximum drawdown. Risking more per trade would scale return and drawdown up roughly in proportion; I have not tested that.
+- **Funding costs more than fees on multi-day holds:** $236 in funding versus $191 in fees, on $2,913 of gross profit.
+- **A $1,000 account can't run this on BTC.** With 0.5% risk and an 8% stop, the position is smaller than Delta's minimum of 0.001 BTC (about $100 at 2025 prices), so about a third of BTC trades get skipped. Results below use $10,000 per coin.
+
+## Step 1: data and sources
+
+| Use | Source | Coverage | Gaps |
+|---|---|---|---|
+| 15m and 1h signals | Delta Exchange India API, BTCUSD/ETHUSD perpetual 1m candles, resampled | 2024-11-13 → 2026-11-23 | One 31-minute exchange halt (Phase 2) |
+| 4h and 1D signals; Step 3 backtest prices | **Binance USD-M perpetual BTCUSDT/ETHUSDT**, public archive [data.binance.vision](https://data.binance.vision/) (monthly and daily 1h kline files) | 2020-01-01 → 2026-11-21, 60,408 hourly bars per coin | None |
+| Funding for screen signals | Delta for 15m/1h; Binance archive (`fundingRate`, 8-hourly, 7,488 readings per coin, to 2026-10-31) for 4h/1D | – | Binance publishes funding monthly only, so November 2026 is missing there |
+| Funding charged in Step 3 | Delta's actual rate from 2024-11-08; before that Binance's rate **plus** the measured Delta−Binance gap (+0.0033% per 8h for BTC, +0.0036% for ETH) | 2020 → 2026 | – |
+| Fees, tick, lot | Delta API (`/v2/products`), unchanged from Phase 2 | – | – |
+
+- **Fallbacks are blocked.** Bybit's public API (HTTP 403) and Binance's live futures API (HTTP 451) refuse requests from this server, so the Binance archive is the only long-history source.
+- **Binance vs Delta prices agree.** Over the overlapping period, 1h returns correlate at 0.9993 and the median close difference is 0.01% (BTC) / 0.015% (ETH). Binance prices are a fair proxy for Delta's.
+- **Funding does not agree.** Delta's averaged 0.0078% per 8h versus Binance's 0.0045% (correlation 0.45), hence the gap adjustment above.
+
+## Step 2: zero-cost edge screen
+
+- **Script and output:** `edge_screen.py` writes `edge_screen.csv`.
+- **Events:** each signal is read at a bar close and held for a fixed horizon, close to close, with no overlap between events.
+- **Measures:** gross edge = average direction-adjusted return per event. The t-test is on excess return over the unconditional average for the same horizon and period.
+- **Split:** first 2/3 of each dataset in-sample, last 1/3 out-of-sample (Delta split at 2026-03-24, Binance split at 2024-08-05).
+- **Correction:** Benjamini-Hochberg on the BTC+ETH pooled out-of-sample p-values.
+
+### How many tests, and how many pass by chance
+
+| Item | Count |
+|---|---|
+| Signal configurations (signal × parameters × timeframe × horizon) | **242** |
+| Individual tests (configuration × asset × in-sample/out-of-sample) | 968 (1,452 rows including BTC+ETH pooled) |
+| Expected false positives at raw p < 0.05, from chance alone | about 12 |
+| Out-of-sample configurations with raw p < 0.05 | 23 (in-sample: 29) |
+| Significant after Benjamini-Hochberg (q ≤ 0.05), out-of-sample | 2 |
+| Of those 2 | 1 survivor; 1 calendar effect (hour 11 UTC) that **reversed** its in-sample direction and has a tiny edge (−0.06%) |
+| Pass all three survival tests | **1** |
+
+The survival tests are: pooled out-of-sample gross edge ≥ 0.36%, positive on both BTC and ETH, and BH-significant.
+
+### By family (out-of-sample, pooled BTC+ETH)
+
+| Family | Configs | Gross edge ≥ 0.36% | Positive on both coins | Raw p < 0.05 | BH-significant | Survivors | Best gross edge (config) |
+|---|---|---|---|---|---|---|---|
+| 1 Time-series momentum | 36 | 7 | 17 | 3 | 0 | 0 | +2.25% (1D, 60-day lookback, 20-day hold), p = 0.13 |
+| 2 Trend filters (price vs MA, MA slope) | 72 | 16 | 45 | 8 | 1 | **1** | **+5.60% (4h, price vs SMA200, 20-day hold), q = 0.031** |
+| 3 Donchian breakouts | 24 | 8 | 12 | 2 | 0 | 0 | +5.34% (1D, 55-day, 20-day hold), p = 0.029, q = 0.45 |
+| 4 Mean reversion (RSI 2/14, MA distance) | 48 | 4 | 6 | 1 | 0 | 0 | +1.97% (1D RSI(2), 20-day hold), p = 0.23 |
+| 5 Calendar (hour, 4h block, weekday, weekend) | 38 | 2 | 15 | 7 | 1 | 0 | +0.55% (Thursday short), p = 0.012, q = 0.45 |
+| 6 Funding extremes (top/bottom 10%) | 18 | 6 | 7 | 1 | 0 | 0 | +2.29% (4h, top-10% funding then long, 20 days), p = 0.60 |
+| 7 Reference: your EMA 9/21 on 15m; earlier EMA 50/200 on 4h | 6 | 2 | 3 | 1 | 0 | 0 | EMA 50/200: +1.72%, p = 0.55. EMA 9/21: −0.04% to +0.10%, p ≥ 0.09 |
+
+By timeframe, the number of configs with a gross edge ≥ 0.36% was: **15m 0 of 48**, 1h 10 of 75, 4h 18 of 60, 1D 17 of 59. Only multi-day horizons produce moves big enough to pay for costs.
+
+**The survivor, unvarnished**
+- **Signal:** 4h price vs SMA200 (about 33 days), long above, short below, held 20 days.
+- **Out-of-sample:** +5.6% gross per trade over 82 non-overlapping trades (BTC +4.2%, ETH +7.0%), 62% hit rate, t = 3.87.
+- **In-sample (2020–2024):** only +1.9% per trade, t = 0.58, **not significant**.
+- **Neighbours point the same way, without significance.** Nearby trend configs (SMA100, SMA200 slope, 1D SMA50, Donchian 20/55 on 1D) were also positive at multi-week horizons, which makes trend-following plausible, but none of them is significant on its own.
+
+## Step 3: full backtest of the survivor
+
+- **Code:** `strategies/trend_ma_4h.py`, run by `phase3_runner.py`.
+- **Rules:**
+  - At each 4h close, long if price is above its SMA(n), short if below.
+  - Market entry at the next bar open.
+  - Exit after the holding period or at a hard stop of 2 × the 20-day ATR (daily bars), then re-enter at the next 4h close in the current direction.
+- **Costs:** Delta fees; slippage 0.01% (base) and 0.03% (stress) per side; actual funding every 8h.
+- **Sizing:** 0.5% risk per trade, leverage capped at 3x, $10,000 per coin.
+- **Walk-forward:**
+  - Train 24 months, test 6 months, roll 6 months.
+  - Tune SMA length n ∈ {100, 150, 200, 250, 300} (4h bars) and hold ∈ {10, 20, 30} days, picked by combined daily Sharpe on each training window.
+  - Ten test windows from 2022-01-01, stitched together.
+
+### PASS checklist (taker fees, 0.01% slippage, stitched out-of-sample)
+
+| Test | Bar | Result | Pass |
+|---|---|---|---|
+| Net profit factor | ≥ 1.3 | 1.43 | ✓ |
+| Net positive on BTC | > 0 | +$1,146 (+11.5%) | ✓ |
+| Net positive on ETH | > 0 | +$1,340 (+13.4%) | ✓ |
+| Random-entry baseline (200 runs) | > 95th percentile | 97th (BTC alone 93rd, ETH alone 94.5th) | ✓ (combined) |
+| Sharpe vs 50/50 buy-and-hold | higher | 0.83 vs 0.23 | ✓ |
+| CAGR / max drawdown vs buy-and-hold | higher | 0.86 vs −0.04 | ✓ |
+| Trades | ≥ 30 | 267 | ✓ |
+| Bootstrap 95% CI of expectancy | above 0 | +0.02R to +0.36R (mean +0.19R) | ✓ (barely) |
+
+### Cost scenarios (stitched out-of-sample, BTC+ETH, $20,000 total)
+
+| Scenario | Trades | Net $ | Fees $ | Funding $ | PF | Expectancy R | CI low (R) | Sharpe | CAGR/MaxDD |
+|---|---|---|---|---|---|---|---|---|---|
+| Taker, 0.01% slippage | 267 | +2,485 | 191 | −236 | 1.43 | 0.186 | 0.019 | 0.83 | 0.86 |
+| Taker, 0.03% slippage | 265 | +2,603 | 191 | −224 | 1.46 | 0.194 | 0.027 | 0.86 | 0.90 |
+| Maker (limit fills assumed), 0.01% | 267 | +2,466 | 99 | −239 | 1.42 | 0.185 | 0.016 | 0.82 | 0.85 |
+| Maker (limit fills assumed), 0.03% | 267 | +2,449 | 99 | −239 | 1.41 | 0.184 | 0.015 | 0.82 | 0.84 |
+
+The 0.03% stress run ending slightly *better* than 0.01% is not a real effect. One different exit shifts every later entry (path dependence), and that noise (about ±5%) is as large as the cost difference.
+
+### Strategy vs buy-and-hold (same dates; buy-and-hold is price only, no funding)
+
+| | Total return | CAGR | Max drawdown | CAGR/MaxDD | Sharpe |
+|---|---|---|---|---|---|
+| Strategy, BTC | +11.5% | +2.2% | 5.9% | 0.38 | 0.69 |
+| Strategy, ETH | +13.4% | +2.6% | 3.8% | 0.69 | 0.80 |
+| Strategy, BTC+ETH | +12.4% | +2.4% | 2.8% | 0.86 | 0.83 |
+| Buy & hold BTC | +30.3% | +5.6% | 66.9% | 0.08 | 0.36 |
+| Buy & hold ETH | −54.2% | −14.7% | 74.0% | −0.20 | 0.11 |
+| Buy & hold 50/50 | −12.0% | −2.6% | 68.9% | −0.04 | 0.23 |
+
+### Robustness
+
+| Check | Result |
+|---|---|
+| Clean half, 2022-01 → 2024-08 (not used to pick the signal) | 137 trades, PF 1.33, BTC +$756, ETH +$286, expectancy +0.15R, CI −0.08R to +0.41R, **87.5th percentile vs random → would not pass** |
+| Overlap half, 2024-08 → 2026-11 (used to pick the signal) | 130 trades, PF 1.54, BTC +$390, ETH +$1,053, expectancy +0.22R, CI −0.02R to +0.48R, 96.5th percentile |
+| Net $ by entry year | 2022 +37, 2023 +713, 2024 +496, 2025 +50, 2026 +1,190 (48% of the total from 2026 alone) |
+| Long vs short | Longs +$1,434, shorts +$1,052 (both positive) |
+| Parameters picked per window | SMA 100–300 and hold 10–30 days both changed across windows; no stable optimum |
+| Exposure | Average position 5.8% of equity (max about 11%); average hold 13 days; 37% of trades exit at the stop |
+| $1,000 per coin instead of $10,000 | About a third of BTC trades skipped (below 1 contract); PF 1.57, random percentile 99.5. Better, but only because the trade sequence changed |
+
+Equity curves against buy-and-hold are in `charts/phase3_trend_ma_4h.png`.
+
+### Phase 3 assumptions
+
+| # | Assumption |
+|---|---|
+| 1 | Binance BTCUSDT/ETHUSDT prices stand in for Delta BTCUSD/ETHUSD (correlation 0.999 over the overlap); Delta fees, tick and lot are used for costs |
+| 2 | Funding before Nov 2024 = Binance rate + measured Delta gap; Delta actual after |
+| 3 | Screen: close-to-close forward returns, non-overlapping events, no costs. Calendar and funding signal directions were chosen in-sample, so their in-sample numbers are biased upward |
+| 4 | Survival rule: pooled BTC+ETH out-of-sample gross edge ≥ 0.36% (3 × your ~0.12%); both coins positive; BH q ≤ 0.05 on pooled out-of-sample p-values. At Phase 2's cost model (0.138%, so 3× = 0.41%) the result is the same |
+| 5 | Strategy additions to the screened signal: a 2 × daily-ATR(20) hard stop (needed for 0.5% risk sizing) and immediate re-entry after each exit |
+| 6 | Walk-forward picks by combined daily mark-to-market Sharpe under taker costs (at least 10 trades); the same picks are used for every cost scenario |
+| 7 | Benchmark tests compare BTC+ETH combined with 50/50 buy-and-hold (per-coin comparisons also shown; both coins beat their own buy-and-hold) |
+| 8 | PASS needs the bootstrap CI lower bound above 0 (10,000 resamples of trade R); otherwise LOW-CONFIDENCE |
+| 9 | The maker scenario assumes limit orders fill at the bar open; stops stay stop-market |
+| 10 | Mark-to-market equity is valued at daily closes, with half of the trade's fees charged while open |
+
+### Phase 3 files
+
+- `edge_screen.py` → `edge_screen.csv` (every test) and `logs/edge_screen_summary.md`
+- `phase3_runner.py` → `phase3_verdicts.csv`, `phase3_results.csv` (all scenarios, segments and assets), `logs/phase3_walkforward_trend_ma_4h.csv` (every parameter on every training window), `logs/phase3_random_baseline.csv`, `logs/phase3_subperiod_checks.csv`, `charts/phase3_trend_ma_4h.png`
+- `core/binance_data.py` (Binance archive downloader), `core/market.py` (`load_binance_market`, any bar size), `strategies/trend_ma_4h.py`
+- `data/` is no longer committed. Rebuild it with:
+
+```bash
+python3 -m core.data download --days 740
+```
+
+```bash
+python3 -m core.binance_data
+```
+
+Then rerun everything:
+
+```bash
+python3 edge_screen.py
+```
+
+```bash
+python3 phase3_runner.py
+```
+
+### What I'd do next (not done; you asked me to stop here)
+
+1. Paper-trade the trend filter forward on Delta's testnet for at least 6 months: the only clean test left.
+2. Test the identical rules on other liquid perpetuals (SOL, XRP, BNB) from Binance's archive. That is an out-of-sample check that doesn't need new time to pass.
+3. If both hold up, decide the risk per trade deliberately: at 0.5% the strategy earns about 2.4% a year.
+
+---
+
+# Phase 2: do crypto scalping strategies make money on Delta Exchange India?
 
 Backtest of 7 shortlisted strategies on 2 years of Delta Exchange 1-minute data for BTCUSD and ETHUSD perpetuals, run on 23 Nov 2026.
 
