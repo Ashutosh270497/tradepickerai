@@ -1,3 +1,116 @@
+# Phase 5: correlation check and a forward paper-trading system
+
+Run on 23 Nov 2026. [`frozen_rules.md`](frozen_rules.md) is unchanged; nothing was retuned.
+
+## Step 1: does Part A still pass once coin correlation is respected? Yes, narrowly
+
+The Phase 4 random baseline drew each coin's entry times independently. The strategy's trades cluster in time across coins, because the coins trend together. I reran the pooled Part A test two ways (`phase5_robustness.py`).
+
+| Check | Result | Verdict |
+|---|---|---|
+| Phase 4 baseline (independent random times per coin) | Strategy +888R vs 95th percentile +353R: beat all 200 runs | passed (overstated) |
+| **Synchronized random baseline, 200 runs** (every coin draws from the same random calendar hours; long/short timing shared too) | Strategy +888R vs 95th percentile +884R: **95.0th percentile** | passes by a hair |
+| Same, 1,000 runs, different seed (to pin the estimate down) | 95th percentile +824R; strategy at the **96.5th percentile ± 0.6** | passes |
+| **Block bootstrap of pooled daily P&L** (calendar-month blocks, 10,000 draws, 33 coins × $10,000) | Mean +$18.4 a day; **95% CI +$6.1 to +$31.4 a day** (per trade +$9.4, CI +$3.1 to +$16.0); 0.1% of draws ≤ 0 | expectancy positive |
+
+**Conclusion: Part A still passes.** The other two Part A criteria (31 of 33 coins positive, PF 1.38) don't depend on how the baseline is drawn. The correlation concern was valid, though:
+- Synchronized random timing alone produces a much wider spread of pooled results (standard deviation about 370R).
+- Against that spread, the strategy's timing edge clears the 95% bar only narrowly.
+- Expected profit is positive with high confidence, but much of it comes from being in the market during the big market-wide trends, not from coin-by-coin timing skill.
+
+The verdict is unchanged, but treat the edge as real and modest, not strong.
+
+## Step 2: shadow paper trader (built, tested, dry-run complete)
+
+**Code:** `paper/`, plus `paper_config.json`. It uses **public Delta India data only**: no API keys, no orders.
+
+**What happens at each 4h close**, a few minutes after 00/04/08/12/16/20 UTC:
+1. New closed 1h candles and funding readings are fetched into SQLite (from a fixed history anchor, so indicators match the backtest).
+2. **Stops** are checked from the candles, as resting exchange stop orders (so they work even while the trader is down).
+3. Delta's published **funding** is applied once per settlement.
+4. **Time exits and entries** use the live last price ± 0.01% slippage.
+5. Every live fill stores the **L1 best bid/ask with sizes**, the mark price and the last price.
+
+**No drift from the backtest.** Signal, stop distance, stop and gap detection, position size, fees and funding are the backtest's own functions:
+- `strategies.trend_ma_4h.build`;
+- `core.engine.path_exit`, `position_size`, `trade_costs` and `funding_events`.
+
+The engine refactor that exposed these left Phases 2–4 byte-identical.
+
+**Restart safety:**
+- Each (coin, 4h bar) is processed exactly once, inside one database transaction.
+- Positions are unique per coin and entry time.
+- A crash in the middle of a bar rolls back; a rerun enters once.
+
+**Tests** (`tests/test_paper.py`, all 26 tests in the repo pass):
+
+| Test | What it proves |
+|---|---|
+| Signal and cost parity (synthetic data with stop and time exits, varying funding) | Bar-by-bar replay gives **exactly** the same trades, prices, quantities, funding and net P&L as `engine.run` |
+| Parity on 300 days of real Delta BTC candles | Same, on real data |
+| Restart safety | Rerunning a bar changes nothing; a simulated crash after writing an entry rolls back and the rerun enters once |
+| Funding accounting | Each settlement charged once with the right sign and rate (published value in the prior hour), never after exit, equal to the engine |
+| Pause | No new entries while paused |
+| Reconciliation | 0 mismatches on a clean replay; an extra paper trade is flagged with its type |
+| Container state | S3 round trip; a stale overlapping run cannot overwrite newer state (conditional write) |
+
+### Your budget and coins
+
+- **Budget:** $2,500, with the split you chose: BTCUSD $1,400, ETHUSD $600, XRPUSD $167, BCHUSD $167, LTCUSD $166.
+- **Why the split:** BTC alone needs about $1,070 at 0.5% risk today.
+- **Cost of the small sub-accounts:** XRP, BCH and LTC round to whole contracts, so their actual risk per trade can be well below 0.5%, and historically many LTC and ETH trades fall below one contract.
+
+**Backtest reference for exactly this setup** (2020–2026, `logs/paper_plan_stats.json`):
+- +22.9% total, 3.1% a year;
+- maximum drawdown 2.42%;
+- about 99 trades a year, so the 100-trade review lands at about **month 12**.
+
+### Dry run on the latest closed bar: done (23 Nov 2026, 12:00 UTC close, live Delta data)
+
+| Coin | Signal | Entry (live last −0.01%) | Stop | Qty | Measured slippage vs last price | Half-spread |
+|---|---|---|---|---|---|---|
+| BTCUSD | short | 61,267.9 | 66,930.3 (9.24%) | 0.001 (1 contract) | 0.001% | 0.000% |
+| ETHUSD | short | 1,719.38 | 1,935.73 (12.58%) | 0.01 (1 contract) | 0.003% | 0.002% |
+| XRPUSD | short | 0.939906 | 1.05998 (12.78%) | 6 | 0.011% | 0.011% |
+| BCHUSD | short | 199.48 | 228.676 (14.64%) | 0.02 | 0.030% | 0.008% |
+| LTCUSD | short | 40.9959 | 46.4444 (13.29%) | 0.1 (1 contract) | 0.098% | 0.024% |
+
+- **Reruns are safe:** a second run on the same bar did nothing.
+- **The Docker image works:** it built and ran the same cycle end to end; a second container run also did nothing.
+- **Telegram:** not configured here, and its host isn't allowed in this environment, so alerts were logged instead of sent.
+
+**Finding to act on before deploying.** Measured slippage averaged **0.028% per side**, close to the plan's 0.03% pause threshold. It comes from LTC and BCH, whose last trade was stale relative to the order book; BTC and ETH were 0.001–0.003%, and the real half-spread averaged 0.009%. Because the plan measures slippage against the last traded price, thinly traded coins could trigger the slippage pause even when the real cost is small. That's your call; see the end of this section.
+
+## Steps 3–5: reconciliation, alerts, plan, deployment
+
+- **Weekly reconciliation** (`paper/reconcile.py`):
+  - Reruns `engine.run` on the **same stored Delta candles** over the paper period.
+  - Matches trades by coin, entry bar and direction.
+  - Flags every trade found in only one log, or with a different exit type or bar, with a likely cause: missed run, stop level shifted by the live entry price, or unexplained.
+  - Lists price differences above 0.2%.
+- **Telegram:** an alert for every entry, exit and skip, plus a weekly summary (equity, open positions, funding, measured slippage vs 0.01%, reconciliation). The token comes from `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` environment variables only.
+- **[`paper_trading_plan.md`](paper_trading_plan.md)** was committed (`4a802b3`, 12:19 UTC) **before** the paper trader ran. It contains:
+  - the review point (6 months or 100 closed trades, whichever comes later);
+  - the pause rules: drawdown > 4.83%, reconciliation mismatches > 5% of trades, average slippage > 0.03% per side;
+  - six pre-set "go live with small money" criteria.
+- **Deployment** ([`docs/deploy_aws.md`](docs/deploy_aws.md)):
+  - an ECS Fargate scheduled task in ap-south-1 every 4h at :05 UTC;
+  - state in versioned S3 with conditional writes, logs in CloudWatch, the Telegram token in SSM;
+  - estimated **$0.20–0.60 a month**, vs about $6–7 for an always-on t4g.nano.
+
+## Phase 5 assumptions
+
+| # | Assumption |
+|---|---|
+| 1 | Paper entries and time exits use the live **last traded price** a few minutes after the 4h close as the stand-in for the backtest's bar open; stops are inferred from 1h candles as resting exchange orders |
+| 2 | Funding realised at a settlement = Delta's published rate in the hour before (as in Phases 3–4) |
+| 3 | The paper account is split into one sub-account per coin, as the frozen rules require; the split (BTC $1,400, ETH $600, XRP/BCH/LTC ~$167) was your choice |
+| 4 | Missed 4h closes (trader down) are logged; entries and time exits then happen at the next live run, while stops are unaffected |
+| 5 | Fargate Mumbai cost uses US East ARM rates as a proxy (Mumbai's rate wasn't retrievable); EC2 cost from third-party price trackers |
+| 6 | The S3 state path is tested with a fake S3 client, not against AWS (no AWS credentials here) |
+
+---
+
 # Phase 4: does the frozen 4h trend filter work on data it has never seen?
 
 Run on 23 Nov 2026.

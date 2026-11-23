@@ -1,0 +1,11 @@
+.git
+data/
+logs/
+charts/
+state/
+results/
+backtest/
+tests/
+**/__pycache__
+*.db*
+.env

@@ -200,3 +200,66 @@ def test_paused_trader_takes_no_new_entries_but_still_exits(tmp_path):
     for T in range(start, start + 120 * 86400, FOUR_H):
         process_coin(st, cfg(st), T, {"ref": opens[T]}, live=False, paused=True, now=T)
     assert st.db.execute("SELECT COUNT(*) n FROM positions").fetchone()["n"] == 0
+
+
+def test_weekly_reconciliation_matches_backtest_and_flags_differences(tmp_path):
+    from paper.reconcile import reconcile
+    bars = synthetic()
+    st = make_store(tmp_path, bars)
+    start, end = T0 + 60 * 86400, T0 + 200 * 86400
+    replay(st, bars, start, end)
+    rec = reconcile(st, end)
+    assert rec["trades"] > 5 and rec["mismatches"] == 0
+    # a paper trade the backtest never took must be reported as a mismatch
+    with st.tx() as db:
+        db.execute("INSERT INTO positions(coin, dir, qty, entry_time, entry_price, stop, stop_dist, time_exit_time, entry_fee, "
+                   "equity_before, capped, status) VALUES('TESTUSD', 1, 0.001, ?, 100, 90, 10, ?, 0, 10000, 0, 'open')",
+                   (end - 3 * FOUR_H + 3600, end + 86400))
+    rec2 = reconcile(st, end)
+    assert rec2["mismatches"] == 1 and rec2["rows"][0]["type"] == "only in paper"
+
+
+class FakeS3:
+    """Minimal S3 stand-in with ETag-conditional writes (IfMatch / IfNoneMatch) like the real API."""
+    class exceptions:
+        class NoSuchKey(Exception):
+            pass
+
+    def __init__(self):
+        self.obj, self.etag, self.n = None, None, 0
+
+    def get_object(self, Bucket, Key):
+        if self.obj is None:
+            raise FakeS3.exceptions.NoSuchKey()
+        import io
+        return {"Body": io.BytesIO(self.obj), "ETag": self.etag}
+
+    def put_object(self, Bucket, Key, Body, IfMatch=None, IfNoneMatch=None):
+        if IfNoneMatch == "*" and self.obj is not None:
+            raise RuntimeError("PreconditionFailed: object exists")
+        if IfMatch is not None and IfMatch != self.etag:
+            raise RuntimeError("PreconditionFailed: stale ETag")
+        self.n += 1
+        self.obj, self.etag = Body, f'"v{self.n}"'
+
+
+def test_container_state_roundtrip_and_conditional_write(tmp_path, monkeypatch):
+    from paper import run_task
+    fake = FakeS3()
+    monkeypatch.setenv("PAPER_STATE_S3", "s3://bucket/paper.db")
+    monkeypatch.setattr(run_task, "LOCAL", str(tmp_path / "paper.db"))
+    monkeypatch.setattr(run_task, "_s3", lambda: (fake, "bucket", "paper.db"))
+    calls = []
+    monkeypatch.setattr(run_task, "cmd_init", lambda a: (Store(a.db).set_meta("initialised", 1), calls.append("init")))
+    monkeypatch.setattr(run_task, "cmd_run", lambda a: (Store(a.db).log("info", "ran"), calls.append("run")))
+    monkeypatch.setattr("sys.argv", ["run_task"])
+    run_task.main()                                  # first run: no state -> init + run + create object
+    assert calls == ["init", "run"] and fake.etag == '"v1"'
+    (tmp_path / "paper.db").unlink()                 # a fresh container has no local file
+    run_task.main()                                  # second run: download, run (no init), conditional upload
+    assert calls == ["init", "run", "run"] and fake.etag == '"v2"'
+    # an overlapping run that downloaded v2 cannot overwrite a newer v3
+    etag = run_task.download()
+    fake.put_object(Bucket="bucket", Key="paper.db", Body=fake.obj, IfMatch=fake.etag)   # someone else wrote v3
+    with pytest.raises(RuntimeError, match="stale ETag"):
+        run_task.upload(etag)

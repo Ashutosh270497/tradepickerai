@@ -1,0 +1,4 @@
+# runtime dependencies of the paper-trader container only
+pandas==3.0.5
+numpy==2.5.3
+boto3==1.40.70
